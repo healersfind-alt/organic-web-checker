@@ -16,7 +16,5 @@ RUN playwright install chromium
 
 COPY . .
 
-ENV PORT=8000
-EXPOSE 8000
-
-CMD gunicorn -w 1 -b 0.0.0.0:$PORT --timeout 180 app:app
+# Railway injects PORT at runtime — do not hardcode it
+CMD gunicorn -w 1 -b 0.0.0.0:${PORT:-8000} --timeout 180 app:app

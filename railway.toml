@@ -1,5 +1,7 @@
+[build]
+builder = "DOCKERFILE"
+
 [deploy]
-startCommand = "gunicorn -w 1 -b 0.0.0.0:$PORT --timeout 180 app:app"
 healthcheckPath = "/"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
