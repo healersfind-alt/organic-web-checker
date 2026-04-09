@@ -194,8 +194,10 @@ HTML = """
       method: 'POST',
       body: new URLSearchParams(formData)
     });
-    // Reload with results via redirect
-    window.location.href = res.url || '/';
+    const html = await res.text();
+    document.open();
+    document.write(html);
+    document.close();
   });
 </script>
 
