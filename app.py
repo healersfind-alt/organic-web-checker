@@ -116,7 +116,26 @@ HTML = """
     }
     header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: 0.02em; }
     header p { font-size: 0.85rem; opacity: 0.75; margin-top: 4px; }
-    .header-icon { width: 52px; height: 52px; flex-shrink: 0; opacity: 0.92; }
+    .header-icon-wrap { position: relative; flex-shrink: 0; }
+    .header-icon-btn { background: none; border: none; cursor: pointer; padding: 0; display: block; border-radius: 6px; }
+    .header-icon-btn:focus-visible { outline: 2px solid rgba(255,255,255,0.6); outline-offset: 2px; }
+    .header-icon { width: 52px; height: 52px; opacity: 0.92; display: block; }
+    .header-dropdown {
+      position: absolute; top: calc(100% + 8px); right: 0;
+      background: white; border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+      min-width: 188px; z-index: 100;
+      display: none; overflow: hidden;
+    }
+    .header-dropdown.open { display: block; }
+    .dropdown-item {
+      display: block; padding: 12px 18px;
+      font-size: 0.875rem; color: #1a1a1a;
+      text-decoration: none; border-bottom: 1px solid #f0f0ee;
+      cursor: pointer;
+    }
+    .dropdown-item:last-child { border-bottom: none; }
+    .dropdown-item:hover { background: #f5f5f0; color: #2d5a27; }
 
     main { max-width: 860px; margin: 40px auto; padding: 0 24px; }
 
@@ -183,6 +202,24 @@ HTML = """
     .status-done    { background: #eaf4ea; color: #2d5a27; }
     .status-error   { background: #fdf3f2; color: #c0392b; }
     @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+
+    /* Animated checker loader — queued/running state */
+    .checker-loader {
+      position: relative; width: 40px; height: 40px;
+      flex-shrink: 0; border-radius: 3px; overflow: hidden;
+      background: repeating-conic-gradient(#2d5a27 0% 25%, #8bc78b 0% 50%) 0 0 / 8px 8px;
+    }
+    .cb-p {
+      position: absolute; width: 6px; height: 6px;
+      border-radius: 50%; background: #7b1f00;
+      box-shadow: inset 0 -1px 1px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.5);
+    }
+    .cb-p.p1 { animation: cb1 2s ease-in-out infinite; }
+    .cb-p.p2 { animation: cb2 2s ease-in-out infinite 0.67s; }
+    .cb-p.p3 { animation: cb3 2s ease-in-out infinite 1.33s; }
+    @keyframes cb1 { 0%,100% { top:1px;  left:9px;  } 50% { top:17px; left:25px; } }
+    @keyframes cb2 { 0%,100% { top:9px;  left:33px; } 50% { top:25px; left:17px; } }
+    @keyframes cb3 { 0%,100% { top:25px; left:1px;  } 50% { top:9px;  left:17px; } }
 
     .view-btn {
       font-size: 0.75rem; padding: 3px 10px;
@@ -251,9 +288,19 @@ HTML = """
 <header>
   <div>
     <h1>Organic Web Checker</h1>
-    <p>Compare products marketed as organic on a website against the USDA Organic Integrity Database certificate</p>
+    <p>Checkers are web checks — compare organic product claims against the USDA OID certificate</p>
   </div>
-  <img src="/static/favicon.svg" class="header-icon" alt="Organic Web Checker">
+  <div class="header-icon-wrap">
+    <button class="header-icon-btn" id="iconBtn" onclick="toggleDropdown(event)">
+      <img src="/static/favicon.svg" class="header-icon" alt="Organic Web Checker">
+    </button>
+    <div class="header-dropdown" id="headerDropdown">
+      <a class="dropdown-item" href="#">Account</a>
+      <a class="dropdown-item" href="#" onclick="scrollToHistory(event)">Web Check History</a>
+      <a class="dropdown-item" href="#">Pricing Plan</a>
+      <a class="dropdown-item" href="#">Settings</a>
+    </div>
+  </div>
 </header>
 
 <main>
@@ -274,10 +321,10 @@ HTML = """
 
   <div class="queue-panel" id="queuePanel" style="display:none">
     <div class="queue-header">
-      Queue <span class="queue-count" id="queueCount">0</span>
+      Checkers <span class="queue-count" id="queueCount">0</span>
     </div>
     <ul class="queue-list" id="queueList">
-      <li class="empty-queue">No checks in queue</li>
+      <li class="empty-queue">No checkers yet</li>
     </ul>
   </div>
 
@@ -350,7 +397,12 @@ HTML = """
     count.textContent = jobs.length;
 
     list.innerHTML = jobs.map(j => {
-      const pill = `<span class="status-pill status-${j.status}">${j.status}</span>`;
+      let pill;
+      if (j.status === 'queued' || j.status === 'running') {
+        pill = `<div class="checker-loader"><div class="cb-p p1"></div><div class="cb-p p2"></div><div class="cb-p p3"></div></div>`;
+      } else {
+        pill = `<span class="status-pill status-${j.status}">${j.status}</span>`;
+      }
       const viewBtn = (j.status === 'done' || j.status === 'error')
         ? `<button class="view-btn" onclick="showJob('${j.id}')">View</button>`
         : '';
@@ -368,6 +420,23 @@ HTML = """
   async function showJob(jobId) {
     viewingJobId = jobId;
     await loadResult(jobId);
+  }
+
+  // ── Header dropdown ──────────────────────────────────────────────────────
+  function toggleDropdown(e) {
+    e.stopPropagation();
+    document.getElementById('headerDropdown').classList.toggle('open');
+  }
+  document.addEventListener('click', () => {
+    document.getElementById('headerDropdown').classList.remove('open');
+  });
+  function scrollToHistory(e) {
+    e.preventDefault();
+    document.getElementById('headerDropdown').classList.remove('open');
+    const panel = document.getElementById('queuePanel');
+    if (panel.style.display !== 'none') {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────
