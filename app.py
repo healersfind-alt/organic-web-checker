@@ -525,6 +525,98 @@ GLOBAL_CSS = """
     background: rgba(0,229,204,.04); border: 1px dashed rgba(0,229,204,.15);
     border-radius: 8px; font-size: .8rem; color: var(--muted); line-height: 1.5;
   }
+
+  /* ── Hero banner (main page) ─────────────────────────────────────────── */
+  .hero-banner {
+    background: rgba(255,68,85,.04); border: 1px solid rgba(255,68,85,.1);
+    border-radius: 10px; padding: 14px 20px; margin-bottom: 22px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .hero-penalty {
+    font-size: 1.1rem; font-weight: 900; color: var(--red);
+    text-shadow: 0 0 16px rgba(255,68,85,.5); white-space: nowrap; flex-shrink: 0;
+  }
+  .hero-penalty span { font-size: .68rem; font-weight: 700; vertical-align: middle; margin-left: 2px; }
+  .hero-text { font-size: .8rem; color: var(--muted); flex: 1; min-width: 180px; line-height: 1.5; }
+  .hero-learn { font-size: .76rem; color: var(--neon); text-decoration: none; font-weight: 800; white-space: nowrap; flex-shrink: 0; }
+  .hero-learn:hover { text-shadow: 0 0 10px rgba(0,255,127,.4); }
+
+  /* ── About page ──────────────────────────────────────────────────────── */
+  .about-hero {
+    text-align: center; padding: 40px 28px; position: relative; overflow: hidden;
+  }
+  .about-hero::before {
+    content:''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 10%, rgba(255,68,85,.08) 0%, transparent 65%);
+  }
+  .about-tagline {
+    font-size: 1.3rem; font-weight: 900; line-height: 1.35;
+    color: var(--neon); text-shadow: 0 0 24px rgba(0,255,127,.4); margin-bottom: 30px;
+  }
+  .about-penalty-num {
+    font-size: 4rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums;
+    color: var(--red); text-shadow: 0 0 50px rgba(255,68,85,.65), 0 0 100px rgba(255,68,85,.2);
+  }
+  .about-penalty-label { font-size: .95rem; color: var(--text); font-weight: 700; margin-top: 10px; }
+  .about-penalty-sub   { font-size: .76rem; color: var(--muted); margin-top: 4px; }
+
+  .about-section-title {
+    font-size: .73rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .about-p    { font-size: .88rem; color: var(--muted); line-height: 1.65; margin-bottom: 14px; }
+  .about-lead { font-size: .98rem; font-weight: 700; color: var(--text); line-height: 1.5; margin-bottom: 6px; }
+
+  .risk-list, .feature-list, .consequence-list { list-style: none; display: grid; gap: 5px; margin-top: 4px; }
+  .risk-list li {
+    font-size: .86rem; padding: 8px 14px;
+    background: rgba(255,68,85,.04); border-left: 3px solid rgba(255,68,85,.28);
+    border-radius: 0 6px 6px 0; color: var(--text);
+    display: flex; align-items: flex-start; gap: 9px; line-height: 1.45;
+  }
+  .feature-list li {
+    font-size: .86rem; padding: 8px 14px;
+    background: rgba(0,255,127,.03); border-left: 3px solid rgba(0,255,127,.2);
+    border-radius: 0 6px 6px 0; color: var(--text);
+    display: flex; align-items: flex-start; gap: 9px; line-height: 1.45;
+  }
+  .consequence-list li {
+    font-size: .86rem; padding: 8px 14px;
+    background: rgba(255,208,96,.03); border-left: 3px solid rgba(255,208,96,.2);
+    border-radius: 0 6px 6px 0; color: var(--text);
+    display: flex; align-items: flex-start; gap: 9px; line-height: 1.45;
+  }
+  .audience-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(186px,1fr)); gap: 10px;
+  }
+  .audience-card {
+    font-size: .84rem; padding: 14px 16px;
+    background: rgba(0,229,204,.04); border: 1px solid rgba(0,229,204,.1);
+    border-radius: 9px; color: var(--text); line-height: 1.45;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .certbridge-badge {
+    display: inline-block; font-size: .7rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; padding: 3px 10px; border-radius: 8px; margin-bottom: 12px;
+    background: rgba(0,229,204,.08); border: 1px solid rgba(0,229,204,.2); color: var(--cyan);
+  }
+  .about-bottom-line {
+    font-size: 1.02rem; font-weight: 800; color: var(--neon);
+    text-shadow: 0 0 20px rgba(0,255,127,.35); line-height: 1.45;
+    text-align: center; margin-bottom: 12px;
+  }
+  .about-bottom-sub { font-size: .86rem; color: var(--muted); text-align: center; line-height: 1.6; }
+  .cta-btn {
+    display: inline-block; margin-top: 22px;
+    background: var(--neon-dark); color: #c8ffd8;
+    border: 1px solid rgba(0,255,127,.28); border-radius: 8px;
+    padding: 12px 32px; font-size: .92rem; font-weight: 800; letter-spacing: .04em;
+    text-decoration: none;
+    transition: background .2s, box-shadow .2s;
+    box-shadow: 0 0 20px rgba(0,255,127,.14);
+  }
+  .cta-btn:hover { background: var(--neon-dim); color: #030a06; box-shadow: 0 0 30px rgba(0,255,127,.35); }
 """
 
 
@@ -550,6 +642,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
   <div class="header-right">
     <nav class="header-nav">
       <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Run Checker</a>
+      <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">About</a>
       <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
       <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
       <a href="/account" class="nav-link {{ 'active' if active == 'account' else '' }}">Account</a>
@@ -701,7 +794,10 @@ MAIN_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Organic Web Checker</title>
+  <title>Organic Web Checker — Automatic Organic Compliance Audits</title>
+  <meta name="description" content="Catch every non-compliant organic claim before it becomes a $22,974-per-violation USDA penalty. Organic Web Checker automatically audits your website against your live USDA organic certificate.">
+  <meta property="og:title" content="Organic Web Checker — Automatic Organic Compliance Audits">
+  <meta property="og:description" content="Catch non-compliant organic claims before they become costly USDA penalties. Instant website audits against your live organic certificate.">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <style>""" + GLOBAL_CSS + """
     /* main-page report card title */
@@ -721,6 +817,7 @@ MAIN_HTML = """<!DOCTYPE html>
   <div class="header-right">
     <nav class="header-nav">
       <a href="/"        class="nav-link active">Run Checker</a>
+      <a href="/about"   class="nav-link">About</a>
       <a href="/history" class="nav-link">History</a>
       <a href="/pricing" class="nav-link">Pricing</a>
       <a href="/account" class="nav-link">Account</a>
@@ -740,6 +837,11 @@ MAIN_HTML = """<!DOCTYPE html>
 </header>
 
 <main class="page-main">
+  <div class="hero-banner">
+    <div class="hero-penalty">$22,974<span>&thinsp;/ violation</span></div>
+    <div class="hero-text">Catch every non-compliant organic claim before it becomes a USDA penalty &mdash; automatic website audits against your live organic certificate.</div>
+    <a href="/about" class="hero-learn">Learn more &rarr;</a>
+  </div>
   <div class="card">
     <form id="checkForm">
       <label for="operation">Operation Name (as listed in OID)</label>
@@ -997,6 +1099,99 @@ SETTINGS_BODY = """
 
 
 # ---------------------------------------------------------------------------
+# About page
+# ---------------------------------------------------------------------------
+
+ABOUT_BODY = """
+<div class="card about-hero">
+  <div class="about-tagline">
+    Protect your certification.<br>Verify your claims.<br>Eliminate risk&thinsp;&mdash;&thinsp;automatically.
+  </div>
+  <div class="about-penalty-num">$22,974</div>
+  <div class="about-penalty-label">per violation &bull; per claim &bull; per instance</div>
+  <div class="about-penalty-sub">Maximum civil penalty under the USDA National Organic Program</div>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9888; The Problem</div>
+  <div class="about-p">
+    Every organic claim you publish&thinsp;&mdash;&thinsp;on your website, product pages, or marketing materials&thinsp;&mdash;&thinsp;carries real regulatory weight.
+    Under the USDA National Organic Program, misuse or misrepresentation of organic status can result in civil penalties <strong>per product, per claim, per instance</strong>.
+    Even well-managed operations can unknowingly drift out of compliance.
+  </div>
+  <ul class="risk-list">
+    <li>&#9654; Outdated product listings that no longer match certification scope</li>
+    <li>&#9654; Claims like &ldquo;organic&rdquo; or &ldquo;certified organic&rdquo; applied inconsistently</li>
+    <li>&#9654; Products no longer approved but still live on the website</li>
+    <li>&#9654; Websites evolving faster than compliance reviews can follow</li>
+  </ul>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#10003; The Solution</div>
+  <div class="about-lead">
+    Organic Web Checker automatically audits your website against your certified organic scope&thinsp;&mdash;&thinsp;so nothing slips through the cracks.
+  </div>
+  <div class="about-p">
+    Each <strong style="color:var(--neon)">checker</strong> is one automated web check. Enter an operation name and website URL. The checker pulls the live OID certificate, scans every product page, and instantly flags any organic claim that doesn&rsquo;t match the cert.
+  </div>
+  <ul class="feature-list">
+    <li>&#10003; Scans your entire website for organic product claims and listings</li>
+    <li>&#10003; Cross-checks in real time against the live USDA Organic Integrity Database certificate</li>
+    <li>&#10007; Flags uncertified products labeled as organic</li>
+    <li>&#10007; Catches products no longer approved but still listed as organic</li>
+    <li>&#8595; Exports structured reports as Markdown or PDF for reviewers and auditors</li>
+  </ul>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9888; Why It Matters</div>
+  <div class="about-p">This isn&rsquo;t just a QA tool. It&rsquo;s protection against:</div>
+  <ul class="consequence-list">
+    <li>&#9654; Costly civil penalties ($22,974 per violation)</li>
+    <li>&#9654; Certification suspension or revocation</li>
+    <li>&#9654; Retailer, buyer, and partner fallout</li>
+    <li>&#9654; Public enforcement listings</li>
+  </ul>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9670; Built for the Organic Industry</div>
+  <div class="about-p">Designed for operations where compliance is critical:</div>
+  <div class="audience-grid">
+    <div class="audience-card">&#127807; Certified organic handlers &amp; brands managing product portfolios</div>
+    <div class="audience-card">&#128269; Certifiers scaling compliance oversight across client rosters</div>
+    <div class="audience-card">&#128101; Consultants managing multiple operations simultaneously</div>
+    <div class="audience-card">&#127991; Private label operations with complex or co-packed products</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="certbridge-badge">CertBridge-Ready</div>
+  <div class="about-section-title">&#9670; Part of a Larger Ecosystem</div>
+  <div class="about-p">
+    Organic Web Checker is built to integrate into a continuous compliance ecosystem:
+  </div>
+  <ul class="feature-list">
+    <li>&#8635; Continuous monitoring &mdash; not just one-time audits</li>
+    <li>&#9993; Automated alerts and remediation guidance</li>
+    <li>&#129302; Agent-driven compliance workflows, designed for AI integration</li>
+  </ul>
+</div>
+
+<div class="card" style="text-align:center;padding:36px 28px">
+  <div class="about-bottom-line">
+    Your website is part of your Organic System Plan&thinsp;&mdash;&thinsp;whether you treat it that way or not.
+  </div>
+  <div class="about-bottom-sub">
+    Organic Web Checker makes sure it actually <em>complies like one</em>.
+  </div>
+  <a href="/" class="cta-btn">Run Your First Checker &rarr;</a>
+</div>
+"""
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -1202,6 +1397,12 @@ def history():
 def settings():
     return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
                                   page_title='Settings', active='settings', body=SETTINGS_BODY)
+
+
+@app.route('/about')
+def about():
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='About', active='about', body=ABOUT_BODY)
 
 
 @app.route('/static/<path:filename>')
