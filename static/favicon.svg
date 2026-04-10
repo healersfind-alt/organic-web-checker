@@ -1,18 +1,62 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90" width="90" height="90">
-  <!-- Brown rounded-corner border -->
-  <rect x="4" y="4" width="82" height="82" rx="16" ry="16"
-        fill="white" stroke="#6b3a2a" stroke-width="3.5"/>
-  <!-- 3x3 checkerboard, centered, 24px cells with 3px gap -->
+  <defs>
+    <linearGradient id="g_green" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%" stop-color="#00ff7f"/>
+      <stop offset="45%" stop-color="#00c860"/>
+      <stop offset="100%" stop-color="#007a40"/>
+    </linearGradient>
+    <linearGradient id="g_green2" x1="20%" y1="15%" x2="80%" y2="85%">
+      <stop offset="0%" stop-color="#40ffaa"/>
+      <stop offset="50%" stop-color="#00dd70"/>
+      <stop offset="100%" stop-color="#006030"/>
+    </linearGradient>
+    <radialGradient id="g_shine" cx="35%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#f0fff4"/>
+      <stop offset="100%" stop-color="#d8f0d8"/>
+    </radialGradient>
+    <linearGradient id="g_border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c8843a"/>
+      <stop offset="25%" stop-color="#e8a84a"/>
+      <stop offset="55%" stop-color="#a06520"/>
+      <stop offset="80%" stop-color="#d4924a"/>
+      <stop offset="100%" stop-color="#6b3a12"/>
+    </linearGradient>
+    <linearGradient id="g_bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f0fff4"/>
+      <stop offset="100%" stop-color="#e8f8e8"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="glow2" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="1.4" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect x="2" y="2" width="86" height="86" rx="15" ry="15" fill="url(#g_bg)"/>
+  <!-- Metallic border -->
+  <rect x="2" y="2" width="86" height="86" rx="15" ry="15" fill="none" stroke="url(#g_border)" stroke-width="4.5"/>
+  <!-- Inner highlight on border -->
+  <rect x="4.5" y="4.5" width="81" height="81" rx="13" ry="13" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
   <!-- Row 1: G W G -->
-  <rect x="11" y="11" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <rect x="34" y="11" width="22" height="22" rx="2" fill="white"/>
-  <rect x="57" y="11" width="22" height="22" rx="2" fill="#2d5a27"/>
+  <rect x="11" y="11" width="22" height="22" rx="3.5" fill="url(#g_green)" filter="url(#glow)"/>
+  <rect x="34" y="11" width="22" height="22" rx="3.5" fill="url(#g_shine)"/>
+  <rect x="57" y="11" width="22" height="22" rx="3.5" fill="url(#g_green2)" filter="url(#glow2)"/>
   <!-- Row 2: W G W -->
-  <rect x="11" y="34" width="22" height="22" rx="2" fill="white"/>
-  <rect x="34" y="34" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <rect x="57" y="34" width="22" height="22" rx="2" fill="white"/>
+  <rect x="11" y="34" width="22" height="22" rx="3.5" fill="url(#g_shine)"/>
+  <rect x="34" y="34" width="22" height="22" rx="3.5" fill="url(#g_green)" filter="url(#glow)"/>
+  <rect x="57" y="34" width="22" height="22" rx="3.5" fill="url(#g_shine)"/>
   <!-- Row 3: G W G -->
-  <rect x="11" y="57" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <rect x="34" y="57" width="22" height="22" rx="2" fill="white"/>
-  <rect x="57" y="57" width="22" height="22" rx="2" fill="#2d5a27"/>
+  <rect x="11" y="57" width="22" height="22" rx="3.5" fill="url(#g_green2)" filter="url(#glow2)"/>
+  <rect x="34" y="57" width="22" height="22" rx="3.5" fill="url(#g_shine)"/>
+  <rect x="57" y="57" width="22" height="22" rx="3.5" fill="url(#g_green)" filter="url(#glow)"/>
+  <!-- Highlight sheen on green cells -->
+  <rect x="12" y="12" width="10" height="5" rx="2" fill="rgba(255,255,255,0.45)"/>
+  <rect x="58" y="12" width="10" height="5" rx="2" fill="rgba(255,255,255,0.35)"/>
+  <rect x="35" y="35" width="10" height="5" rx="2" fill="rgba(255,255,255,0.45)"/>
+  <rect x="12" y="58" width="10" height="5" rx="2" fill="rgba(255,255,255,0.35)"/>
+  <rect x="58" y="58" width="10" height="5" rx="2" fill="rgba(255,255,255,0.45)"/>
 </svg>
