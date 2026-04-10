@@ -24,9 +24,14 @@ HTML = """
       background: #2d5a27;
       color: white;
       padding: 24px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
     }
     header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: 0.02em; }
     header p { font-size: 0.85rem; opacity: 0.75; margin-top: 4px; }
+    .header-icon { width: 52px; height: 52px; flex-shrink: 0; opacity: 0.92; }
 
     main { max-width: 860px; margin: 40px auto; padding: 0 24px; }
 
@@ -90,8 +95,22 @@ HTML = """
       background: #fdf3f2; border-left: 3px solid #c0392b;
       border-radius: 0 4px 4px 0;
       margin-bottom: 6px; font-size: 0.9rem;
+      display: flex; align-items: center; gap: 10px;
     }
-    .flag-list li::before { content: "⚠ "; color: #c0392b; }
+    .flag-list li::before { content: "⚠"; color: #c0392b; flex-shrink: 0; }
+    .flag-list a {
+      color: #c0392b; font-weight: 600; text-decoration: none;
+      border-bottom: 1px solid #c0392b40;
+    }
+    .flag-list a:hover { border-bottom-color: #c0392b; }
+    .flag-list .no-link { color: #1a1a1a; }
+    .verify-btn {
+      margin-left: auto; flex-shrink: 0;
+      font-size: 0.75rem; color: #c0392b;
+      border: 1px solid #c0392b50; border-radius: 4px;
+      padding: 2px 8px; text-decoration: none; white-space: nowrap;
+    }
+    .verify-btn:hover { background: #c0392b10; }
 
     .clean { color: #2d5a27; font-weight: 600; padding: 12px 0; }
 
@@ -107,8 +126,11 @@ HTML = """
 <body>
 
 <header>
-  <h1>Organic Web Checker</h1>
-  <p>Compare products marketed as organic on a website against the USDA Organic Integrity Database certificate</p>
+  <div>
+    <h1>Organic Web Checker</h1>
+    <p>Compare products marketed as organic on a website against the USDA Organic Integrity Database certificate</p>
+  </div>
+  <img src="/static/favicon.svg" class="header-icon" alt="Organic Web Checker">
 </header>
 
 <main>
@@ -168,8 +190,15 @@ HTML = """
       {% if report.flagged %}
         <div class="section-title">Non-Compliance Flags — On website as organic, not on OID certificate</div>
         <ul class="flag-list">
-          {% for item in report.flagged | sort %}
-            <li>{{ item }}</li>
+          {% for item in report.flagged | sort(attribute='title') %}
+            <li>
+              {% if item.url %}
+                <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.title }}</a>
+                <a href="{{ item.url }}" target="_blank" rel="noopener" class="verify-btn">Verify →</a>
+              {% else %}
+                <span class="no-link">{{ item.title }}</span>
+              {% endif %}
+            </li>
           {% endfor %}
         </ul>
       {% else %}

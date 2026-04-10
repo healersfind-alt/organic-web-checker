@@ -109,8 +109,8 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 ORGANIC_RE = re.compile(r'\borganic\b', re.IGNORECASE)
 
 
-def scrape_shopify(base_url: str) -> list[str]:
-    """Pull product titles from Shopify JSON API."""
+def scrape_shopify(base_url: str) -> list[dict]:
+    """Pull product titles and URLs from Shopify JSON API."""
     url = base_url.rstrip('/') + '/products.json?limit=250'
     products = []
     page = 1
@@ -121,26 +121,40 @@ def scrape_shopify(base_url: str) -> list[str]:
         batch = r.json().get('products', [])
         if not batch:
             break
-        products.extend(p['title'] for p in batch)
+        products.extend({
+            "title": p['title'],
+            "url": f"{base_url.rstrip('/')}/products/{p['handle']}"
+        } for p in batch)
         if len(batch) < 250:
             break
         page += 1
     return products
 
 
-def scrape_generic(url: str) -> list[str]:
+def scrape_generic(base_url: str) -> list[dict]:
     """
-    Generic HTML scraper. Looks for product titles using common
+    Generic HTML scraper. Looks for product titles and URLs using common
     CSS patterns across Shopify, WooCommerce, BigCommerce, and
     custom sites. Falls back to any visible text near the word 'organic'.
     """
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
+        r = requests.get(base_url, headers=HEADERS, timeout=15)
         r.raise_for_status()
     except Exception as e:
-        return [f"ERROR: {e}"]
+        return [{"title": f"ERROR: {e}", "url": ""}]
 
     soup = BeautifulSoup(r.text, 'html.parser')
+
+    def make_absolute(href: str) -> str:
+        if not href:
+            return ""
+        if href.startswith('http'):
+            return href
+        return base_url.rstrip('/') + '/' + href.lstrip('/')
+
+    def find_link(el) -> str:
+        anchor = el.find_parent('a') or el.find('a')
+        return make_absolute(anchor.get('href', '')) if anchor else ""
 
     # Common product title selectors across platforms
     selectors = [
@@ -158,14 +172,14 @@ def scrape_generic(url: str) -> list[str]:
         'h2.title', 'h3.title',
     ]
 
-    found = set()
+    found = {}  # title -> url
     for sel in selectors:
         for el in soup.select(sel):
             text = el.get_text(strip=True)
-            if text and len(text) > 3:
-                found.add(text)
+            if text and len(text) > 3 and text not in found:
+                found[text] = find_link(el)
 
-    # Fallback: grab JSON-LD product names
+    # Fallback: grab JSON-LD product names + urls
     for script in soup.find_all('script', type='application/ld+json'):
         try:
             import json
@@ -174,21 +188,21 @@ def scrape_generic(url: str) -> list[str]:
             for item in items:
                 if item.get('@type') == 'Product':
                     name = item.get('name', '')
-                    if name:
-                        found.add(name)
+                    if name and name not in found:
+                        found[name] = make_absolute(item.get('url', ''))
         except Exception:
             pass
 
     # Second fallback: meta product titles in page source
     for meta in soup.find_all('meta', {'property': 'og:title'}):
         content = meta.get('content', '')
-        if content and ORGANIC_RE.search(content):
-            found.add(content)
+        if content and ORGANIC_RE.search(content) and content not in found:
+            found[content] = ""
 
-    return list(found)
+    return [{"title": t, "url": u} for t, u in found.items()]
 
 
-def get_organic_products(website_url: str) -> list[str]:
+def get_organic_products(website_url: str) -> list[dict]:
     """
     Try Shopify API first; fall back to generic scraper.
     Returns only products with 'organic' in the title.
@@ -199,7 +213,7 @@ def get_organic_products(website_url: str) -> list[str]:
     if len(all_products) < 3:
         all_products = scrape_generic(website_url)
 
-    return [p for p in all_products if ORGANIC_RE.search(p)]
+    return [p for p in all_products if ORGANIC_RE.search(p['title'])]
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +318,7 @@ def run_check(operation_name: str, website_url: str) -> dict:
     flagged = []
 
     for product in organic_on_site:
-        matched = any(is_match(product, cert_item) for cert_item in cert["products"])
+        matched = any(is_match(product['title'], cert_item) for cert_item in cert["products"])
         if matched:
             verified.append(product)
         else:
@@ -345,8 +359,9 @@ def print_report(report: dict):
         print(f"\n  NON-COMPLIANCE FLAGS ({len(report['flagged'])} items)")
         print(f"  Marketed as organic on website — NOT on OID certificate:")
         print("-" * w)
-        for item in sorted(report["flagged"]):
-            print(f"  ⚠  {item}")
+        for item in sorted(report["flagged"], key=lambda x: x['title']):
+            url_hint = f"  → {item['url']}" if item.get('url') else ""
+            print(f"  ⚠  {item['title']}{url_hint}")
     else:
         print("\n  No flags — all organic-labeled products match certificate.")
 
