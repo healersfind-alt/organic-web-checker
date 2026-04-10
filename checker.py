@@ -216,17 +216,16 @@ def get_oid_cert(operation_name: str) -> dict:
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
-            "--no-zygote",
-            "--single-process",
+            "--disable-setuid-sandbox",
         ])
         page = browser.new_page()
 
         page.goto(
             "https://organic.ams.usda.gov/integrity/",
-            wait_until="networkidle",
-            timeout=40000
+            wait_until="load",
+            timeout=60000
         )
-        time.sleep(4)
+        time.sleep(8)
 
         # Type into the operation name field
         op_input = page.locator("#operation")
