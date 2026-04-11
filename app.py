@@ -978,9 +978,9 @@ MAIN_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Organic Web Checker — Automatic Organic Compliance Audits</title>
-  <meta name="description" content="Catch every non-compliant organic claim before it becomes a $22,974-per-violation USDA penalty. Organic Web Checker automatically audits your website against your live USDA organic certificate.">
-  <meta property="og:title" content="Organic Web Checker — Automatic Organic Compliance Audits">
-  <meta property="og:description" content="Catch non-compliant organic claims before they become costly USDA penalties. Instant website audits against your live organic certificate.">
+  <meta name="description" content="Identify potential non-compliant organic claims on your website. Organic Web Checker compares your organic product listings against your live USDA Organic Integrity Database certificate for review.">
+  <meta property="og:title" content="Organic Web Checker — Organic Compliance Review Tool">
+  <meta property="og:description" content="Surface potential organic compliance gaps for review. Compares your website's organic product claims against your live USDA OID certificate.
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <style>""" + GLOBAL_CSS + """
     /* main-page report card title */
@@ -1022,7 +1022,7 @@ MAIN_HTML = """<!DOCTYPE html>
 <main class="page-main">
   <div class="hero-banner">
     <div class="hero-penalty">$22,974<span>&thinsp;/ violation</span></div>
-    <div class="hero-text">Catch every non-compliant organic claim before it becomes a USDA penalty &mdash; automatic website audits against your live organic certificate.</div>
+    <div class="hero-text">Identify potential non-compliant organic claims for review &mdash; compares your website product listings against your live USDA Organic Integrity Database certificate.</div>
     <a href="/about" class="hero-learn">Learn more &rarr;</a>
   </div>
 
@@ -1036,8 +1036,8 @@ MAIN_HTML = """<!DOCTYPE html>
       <div class="sc-lbl">Flags Detected</div>
     </div>
     <div class="sc-box sc-fines">
-      <div class="sc-num" id="scFines">$0</div>
-      <div class="sc-lbl">Est. Penalties Avoided</div>
+      <div class="sc-num" id="scFines">0</div>
+      <div class="sc-lbl">Items for Review</div>
     </div>
   </div>
 
@@ -1171,11 +1171,7 @@ MAIN_HTML = """<!DOCTYPE html>
       const s = await (await fetch('/stats')).json();
       document.getElementById('scChecks').textContent = s.checks_run.toLocaleString();
       document.getElementById('scFlags').textContent  = s.flags_found.toLocaleString();
-      const f = s.fines_avoided;
-      document.getElementById('scFines').textContent  =
-        f >= 1000000 ? '$' + (f/1000000).toFixed(2) + 'M'
-        : f >= 1000  ? '$' + (f/1000).toFixed(1) + 'K'
-        : '$' + f.toLocaleString();
+      document.getElementById('scFines').textContent = (s.flags_found + s.caution_found).toLocaleString();
     } catch(e) {}
   }
 
@@ -1397,7 +1393,7 @@ SETTINGS_BODY = """
 ABOUT_BODY = """
 <div class="card about-hero">
   <div class="about-tagline">
-    Protect your certification.<br>Verify your claims.<br>Eliminate risk&thinsp;&mdash;&thinsp;automatically.
+    Review your organic claims.<br>Surface potential gaps.<br>Support your compliance process.
   </div>
   <div class="about-penalty-num">$22,974</div>
   <div class="about-penalty-label">per violation &bull; per claim &bull; per instance</div>
@@ -1407,9 +1403,9 @@ ABOUT_BODY = """
 <div class="card">
   <div class="about-section-title">&#9888; The Problem</div>
   <div class="about-p">
-    Every organic claim you publish&thinsp;&mdash;&thinsp;on your website, product pages, or marketing materials&thinsp;&mdash;&thinsp;carries real regulatory weight.
+    Every organic claim you publish on your website carries real regulatory weight.
     Under the USDA National Organic Program, misuse or misrepresentation of organic status can result in civil penalties <strong>per product, per claim, per instance</strong>.
-    Even well-managed operations can unknowingly drift out of compliance.
+    Even well-managed operations can unknowingly drift out of alignment with their current certificate scope.
   </div>
   <ul class="risk-list">
     <li>&#9654; Outdated product listings that no longer match certification scope</li>
@@ -1422,25 +1418,25 @@ ABOUT_BODY = """
 <div class="card">
   <div class="about-section-title">&#10003; The Solution</div>
   <div class="about-lead">
-    Organic Web Checker automatically audits your website against your certified organic scope&thinsp;&mdash;&thinsp;so nothing slips through the cracks.
+    Organic Web Checker compares your website&rsquo;s organic product claims against your current OID certificate scope&thinsp;&mdash;&thinsp;surfacing items that may need review.
   </div>
   <div class="about-p">
     Each <strong style="color:var(--neon)">checker</strong> is one automated web check. Enter an operation name and website URL. The checker pulls the live OID certificate, scans every product page, and instantly flags any organic claim that doesn&rsquo;t match the cert.
   </div>
   <ul class="feature-list">
-    <li>&#10003; Scans your entire website for organic product claims and listings</li>
-    <li>&#10003; Cross-checks in real time against the live USDA Organic Integrity Database certificate</li>
-    <li>&#10007; Flags uncertified products labeled as organic</li>
-    <li>&#10007; Catches products no longer approved but still listed as organic</li>
-    <li>&#8595; Exports structured reports as Markdown or PDF for reviewers and auditors</li>
+    <li>&#10003; Scans your website for product titles containing organic claims</li>
+    <li>&#10003; Compares those titles against the live USDA Organic Integrity Database certificate</li>
+    <li>&#10007; Flags product titles not found on the current OID certificate</li>
+    <li>&#10007; Surfaces products that may no longer appear on the certificate scope</li>
+    <li>&#8595; Exports structured reports as Markdown or PDF for review by certifiers or consultants</li>
   </ul>
 </div>
 
 <div class="card">
   <div class="about-section-title">&#9888; Why It Matters</div>
-  <div class="about-p">This isn&rsquo;t just a QA tool. It&rsquo;s protection against:</div>
+  <div class="about-p">Identifying gaps early gives operations and certifiers a chance to review and address issues before they escalate into:</div>
   <ul class="consequence-list">
-    <li>&#9654; Costly civil penalties ($22,974 per violation)</li>
+    <li>&#9654; Civil penalties ($22,974 maximum per violation)</li>
     <li>&#9654; Certification suspension or revocation</li>
     <li>&#9654; Retailer, buyer, and partner fallout</li>
     <li>&#9654; Public enforcement listings</li>
@@ -1476,7 +1472,7 @@ ABOUT_BODY = """
     Your website is part of your Organic System Plan&thinsp;&mdash;&thinsp;whether you treat it that way or not.
   </div>
   <div class="about-bottom-sub">
-    Organic Web Checker makes sure it actually <em>complies like one</em>.
+    Organic Web Checker helps you identify what needs a closer look.
   </div>
   <a href="/" class="cta-btn">Run Your First Checker &rarr;</a>
 </div>
@@ -1545,7 +1541,7 @@ def jobs_list():
 def get_stats():
     with jobs_lock:
         s = dict(stats)
-    s['fines_avoided'] = s['flags_found'] * 22974
+    s['items_for_review'] = s['flags_found'] + s['caution_found']
     return jsonify(s)
 
 
