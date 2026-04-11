@@ -10,6 +10,32 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
+# ---------------------------------------------------------------------------
+# Compliance categorization patterns
+# Ref: 7 CFR Part 205 (USDA National Organic Program)
+# ---------------------------------------------------------------------------
+
+# Marketing language that uses "organic" contextually rather than as a
+# specific product claim.  These trigger an Orange / marketing-review flag,
+# not a Red / non-compliance flag.
+# Ref: 7 CFR § 205.305–306; NOP Guidance Document 5001
+MARKETING_RE = re.compile(
+    r'\b(?:'
+    r'natural\s+and\s+organic'
+    r'|organic\s+and\s+natural'
+    r'|made\s+with\s+organic'
+    r'|all[\s\-]natural\s+(?:&\s*)?organic'
+    r'|our\s+organic(?!\s+\w+\s+\w+\s+\w)'
+    r'|shop\s+(?:our\s+)?organic'
+    r'|certified\s+organic\s+products?'
+    r'|organic\s+(?:products?|produce|collection|line|range|selection|offerings?)'
+    r'|(?:natural|clean|sustainable)\s+(?:&|and)\s+organic'
+    r'|organic\s+(?:meat|poultry|dairy|eggs?)(?!\s+\w+\s+\w+)'   # generic category names
+    r'|organic\s+(?:farm|farming|grower|grown)'
+    r')\b',
+    re.IGNORECASE
+)
+
 
 # ---------------------------------------------------------------------------
 # Normalization
@@ -96,6 +122,64 @@ def is_match(website_title: str, cert_item: str) -> bool:
                   and w not in ('oil', 'seed', 'butter', 'essential')]
     if core_words and all(normalize(w) in web_norm for w in core_words):
         return True
+
+    return False
+
+
+def is_marketing_language(title: str) -> bool:
+    """
+    Returns True if the product title is marketing/category language
+    rather than a specific organic product claim.
+    Ref: 7 CFR § 205.305–306; NOP Guidance 5001
+    """
+    return bool(MARKETING_RE.search(title))
+
+
+# Words too generic to distinguish products in near-matching
+_NEAR_STOP = {
+    'oil', 'seed', 'seeds', 'butter', 'extract', 'powder',
+    'black', 'white', 'red', 'green', 'blue', 'pure',
+    'raw', 'cold', 'pressed', 'refined', 'unrefined',
+}
+
+def is_near_match(website_title: str, cert_items: list) -> bool:
+    """
+    Returns True if the website product is a close-but-not-exact match to a
+    cert item — indicating a possible name variation rather than a true gap.
+
+    Caution (yellow) sub-categories this detects:
+    - Prefix variants: "Flax Oil" ↔ "Flaxseed Oil" (flax ⊂ flaxseed)
+    - Word-level overlap when full normalize() match fails
+    Ref: certifier review for name alignment, not an NOP violation
+    """
+    web_key = extract_ingredient_key(website_title)
+    web_words = [w for w in web_key.split()
+                 if len(w) >= 4 and w.lower() not in _NEAR_STOP]
+    if not web_words:
+        return False
+
+    for cert_item in cert_items:
+        core = cert_core(cert_item).lower()
+        cert_words = [w for w in core.split()
+                      if len(w) >= 4 and w not in _NEAR_STOP]
+        if not cert_words:
+            continue
+
+        pw = web_words[0].lower()
+        pc = cert_words[0].lower()
+
+        # Prefix relationship (e.g. "flax" ↔ "flaxseed", "hemp" ↔ "hempseed")
+        if pw != pc:
+            if (pc.startswith(pw) and len(pw) >= 4) or \
+               (pw.startswith(pc) and len(pc) >= 4):
+                return True
+
+        # Shared significant word that isn't the primary (e.g. okra / okara share "okr")
+        for w1 in web_words:
+            for w2 in cert_words:
+                if w1 != w2 and len(w1) >= 5 and len(w2) >= 5:
+                    if w1[:5] == w2[:5]:   # first 5 chars identical
+                        return True
 
     return False
 
@@ -300,41 +384,79 @@ def get_oid_cert(operation_name: str) -> dict:
 # Comparison engine
 # ---------------------------------------------------------------------------
 
-def run_check(operation_name: str, website_url: str) -> dict:
+def run_check(operation_name: str, website_url: str,
+              progress_callback=None) -> dict:
     """
     Full check: scrape website + OID, compare, return structured report.
+
+    Categories (ref: 7 CFR Part 205 — USDA NOP):
+      flagged   🔴 Not on OID cert — potential non-compliance (§ 205.307)
+      caution   🟡 Near-match / name variation — certifier review advised
+      marketing 🟠 Marketing-language use of 'organic' (§ 205.305–306)
+      verified  ✅ Confirmed on OID certificate
     """
-    print(f"[1/3] Pulling OID certificate for '{operation_name}'...")
+    def _p(step: int, msg: str):
+        if progress_callback:
+            progress_callback(step, msg)
+
+    _p(1, f"Connecting to USDA Organic Integrity Database…")
+    print(f"[1/4] Pulling OID certificate for '{operation_name}'…")
     cert = get_oid_cert(operation_name)
     if "error" in cert:
         return cert
 
-    print(f"[2/3] Scraping website: {website_url}")
+    _p(2, f"OID certificate loaded — {len(cert['products'])} certified products found")
+    print(f"[2/4] Scraping website: {website_url}")
+    _p(3, f"Scanning {website_url} for organic product claims…")
     organic_on_site = get_organic_products(website_url)
 
-    print(f"[3/3] Comparing {len(organic_on_site)} organic products against {len(cert['products'])} certified items...")
+    _p(4, f"Comparing {len(organic_on_site)} website products against "
+          f"{len(cert['products'])} certified items…")
+    print(f"[3/4] Comparing {len(organic_on_site)} organic products "
+          f"against {len(cert['products'])} certified items…")
 
-    verified = []
-    flagged = []
+    verified  = []   # ✅ Confirmed on OID certificate
+    flagged   = []   # 🔴 Not on cert — non-compliance risk (§ 205.307)
+    caution   = []   # 🟡 Near-match / name variation — certifier review
+    marketing = []   # 🟠 Marketing language using "organic" (§ 205.305-306)
 
     for product in organic_on_site:
-        matched = any(is_match(product['title'], cert_item) for cert_item in cert["products"])
-        if matched:
+        title = product['title']
+
+        # 1. Marketing / category language — orange, not a product claim
+        if is_marketing_language(title):
+            marketing.append(product)
+            continue
+
+        # 2. Exact match against cert
+        if any(is_match(title, ci) for ci in cert["products"]):
             verified.append(product)
-        else:
-            flagged.append(product)
+            continue
+
+        # 3. Near-match — name variation / possible caution
+        if is_near_match(title, cert["products"]):
+            caution.append(product)
+            continue
+
+        # 4. No match — flag as non-compliance risk
+        flagged.append(product)
+
+    print(f"[4/4] Done. Flagged={len(flagged)}  Caution={len(caution)}  "
+          f"Marketing={len(marketing)}  Verified={len(verified)}")
 
     return {
-        "operation": cert["operation"],
-        "certifier": cert["certifier"],
-        "status": cert["status"],
-        "location": cert["location"],
+        "operation":          cert["operation"],
+        "certifier":          cert["certifier"],
+        "status":             cert["status"],
+        "location":           cert["location"],
         "cert_product_count": len(cert["products"]),
-        "cert_products": cert["products"],
-        "website_url": website_url,
+        "cert_products":      cert["products"],
+        "website_url":        website_url,
         "website_organic_count": len(organic_on_site),
-        "verified": verified,
-        "flagged": flagged,
+        "verified":  verified,
+        "flagged":   flagged,
+        "caution":   caution,
+        "marketing": marketing,
     }
 
 
@@ -355,15 +477,29 @@ def print_report(report: dict):
     print(f"  FLAGGED (not on cert)  : {len(report['flagged'])}")
     print("=" * w)
 
-    if report["flagged"]:
-        print(f"\n  NON-COMPLIANCE FLAGS ({len(report['flagged'])} items)")
-        print(f"  Marketed as organic on website — NOT on OID certificate:")
+    if report.get("flagged"):
+        print(f"\n  🔴 NON-COMPLIANCE RISK ({len(report['flagged'])} items)")
+        print(f"  Marketed as organic on website — NOT on OID certificate (§ 205.307):")
         print("-" * w)
         for item in sorted(report["flagged"], key=lambda x: x['title']):
             url_hint = f"  → {item['url']}" if item.get('url') else ""
             print(f"  ⚠  {item['title']}{url_hint}")
     else:
-        print("\n  No flags — all organic-labeled products match certificate.")
+        print("\n  ✅ No non-compliance flags.")
+
+    if report.get("caution"):
+        print(f"\n  🟡 CAUTION — NAME VARIATIONS ({len(report['caution'])} items)")
+        print(f"  Near-match: possible name differences requiring certifier review:")
+        print("-" * w)
+        for item in sorted(report["caution"], key=lambda x: x['title']):
+            print(f"  ~  {item['title']}")
+
+    if report.get("marketing"):
+        print(f"\n  🟠 MARKETING LANGUAGE REVIEW ({len(report['marketing'])} items)")
+        print(f"  Use of 'organic' in marketing context (§ 205.305–306; NOP Guidance 5001):")
+        print("-" * w)
+        for item in sorted(report["marketing"], key=lambda x: x['title']):
+            print(f"  ○  {item['title']}")
 
     print("\n" + "=" * w + "\n")
 

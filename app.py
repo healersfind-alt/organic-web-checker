@@ -19,16 +19,32 @@ jobs = {}
 jobs_lock = threading.Lock()
 _check_semaphore = threading.Semaphore(1)
 
+# In-memory session stats (resets on redeploy; persistent DB coming with Stripe)
+stats = {'checks_run': 0, 'flags_found': 0, 'caution_found': 0}
+
 
 def _run_job(job_id: str, operation: str, website: str):
+    def _progress(step: int, msg: str):
+        with jobs_lock:
+            jobs[job_id]['step'] = step
+            jobs[job_id]['step_msg'] = msg
+
     with _check_semaphore:
         with jobs_lock:
             jobs[job_id]['status'] = 'running'
+            jobs[job_id]['step'] = 1
+            jobs[job_id]['step_msg'] = 'Connecting to USDA Organic Integrity Database…'
         try:
-            report = run_check(operation, website)
+            report = run_check(operation, website, progress_callback=_progress)
             with jobs_lock:
                 jobs[job_id]['status'] = 'done'
                 jobs[job_id]['report'] = report
+            # Update session stats
+            if 'error' not in report:
+                with jobs_lock:
+                    stats['checks_run'] += 1
+                    stats['flags_found'] += len(report.get('flagged', []))
+                    stats['caution_found'] += len(report.get('caution', []))
         except Exception as e:
             with jobs_lock:
                 jobs[job_id]['status'] = 'error'
@@ -43,14 +59,17 @@ def _run_job(job_id: str, operation: str, website: str):
 # ---------------------------------------------------------------------------
 
 def report_to_markdown(report: dict) -> str:
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    flagged  = sorted(report.get('flagged', []),  key=lambda x: x['title'])
-    verified = sorted(report.get('verified', []), key=lambda x: x['title'])
+    now      = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    flagged  = sorted(report.get('flagged',   []), key=lambda x: x['title'])
+    caution  = sorted(report.get('caution',   []), key=lambda x: x['title'])
+    marketing= sorted(report.get('marketing', []), key=lambda x: x['title'])
+    verified = sorted(report.get('verified',  []), key=lambda x: x['title'])
     certs    = sorted(report.get('cert_products', []))
 
     lines = [
         "# ORGANIC WEB CHECKER — COMPLIANCE REPORT",
         f"Generated: {now}",
+        "Regulatory reference: 7 CFR Part 205 — USDA National Organic Program",
         "",
         "## Operation Details",
         f"- **Name:** {report.get('operation', '')}",
@@ -60,19 +79,23 @@ def report_to_markdown(report: dict) -> str:
         f"- **Website:** {report.get('website_url', '')}",
         "",
         "## Summary",
-        "| Metric | Count |",
-        "|--------|-------|",
-        f"| OID Certified Products | {report.get('cert_product_count', 0)} |",
-        f"| Website Organic Products | {report.get('website_organic_count', 0)} |",
-        f"| Verified (on certificate) | {len(verified)} |",
-        f"| **FLAGGED (not on certificate)** | **{len(flagged)}** |",
+        "| Category | Count | Severity |",
+        "|----------|-------|----------|",
+        f"| OID Certified Products | {report.get('cert_product_count', 0)} | — |",
+        f"| Website Organic Claims | {report.get('website_organic_count', 0)} | — |",
+        f"| ✅ Confirmed on Certificate | {len(verified)} | None |",
+        f"| 🔴 Non-Compliance Risk | {len(flagged)} | High — ref § 205.307 |",
+        f"| 🟡 Name Variation / Caution | {len(caution)} | Review advised |",
+        f"| 🟠 Marketing Language | {len(marketing)} | Review — ref § 205.305–306 |",
         "",
     ]
 
+    # ── Non-compliance flags ───────────────────────────────────────────────
     if flagged:
         lines += [
-            f"## ⚠ NON-COMPLIANCE FLAGS ({len(flagged)} items)",
-            "Products marketed as organic on the website but NOT found on the OID certificate:",
+            f"## 🔴 NON-COMPLIANCE RISK ({len(flagged)} items)",
+            "Products marketed as organic on the website but NOT found on the OID certificate.",
+            "Ref: 7 CFR § 205.307 (misrepresentation); § 205.303–305 (labeling requirements)",
             "",
         ]
         for i, item in enumerate(flagged, 1):
@@ -80,17 +103,47 @@ def report_to_markdown(report: dict) -> str:
             lines.append(f"{i}. **{item['title']}**{url}")
         lines.append("")
     else:
-        lines += ["## ✓ NO FLAGS", "All organic-labeled products match the OID certificate.", ""]
+        lines += ["## ✅ NO NON-COMPLIANCE FLAGS",
+                  "All specific organic product claims match the OID certificate.", ""]
 
-    lines += [f"## ✓ VERIFIED PRODUCTS ({len(verified)} items)",
-              "Products on the website that match the OID certificate:", ""]
+    # ── Caution — name variations ──────────────────────────────────────────
+    if caution:
+        lines += [
+            f"## 🟡 NAME VARIATION / CAUTION ({len(caution)} items)",
+            "Products that closely resemble certified items but with possible name differences.",
+            "Not an NOP violation — requires certifier alignment review.",
+            "",
+        ]
+        for i, item in enumerate(caution, 1):
+            url = f" → {item['url']}" if item.get('url') else ""
+            lines.append(f"{i}. {item['title']}{url}")
+        lines.append("")
+
+    # ── Marketing language ─────────────────────────────────────────────────
+    if marketing:
+        lines += [
+            f"## 🟠 MARKETING LANGUAGE REVIEW ({len(marketing)} items)",
+            "Use of 'organic' in marketing/category context rather than specific product claims.",
+            "Certifier should have approved this language in the Organic System Plan.",
+            "Ref: 7 CFR § 205.305–306; USDA NOP Guidance Document 5001",
+            "",
+        ]
+        for i, item in enumerate(marketing, 1):
+            url = f" → {item['url']}" if item.get('url') else ""
+            lines.append(f"{i}. {item['title']}{url}")
+        lines.append("")
+
+    # ── Verified ───────────────────────────────────────────────────────────
+    lines += [f"## ✅ CONFIRMED ON CERTIFICATE ({len(verified)} items)",
+              "Website organic products that match the current OID certificate.", ""]
     for i, item in enumerate(verified, 1):
         url = f" → {item['url']}" if item.get('url') else ""
         lines.append(f"{i}. {item['title']}{url}")
     lines.append("")
 
-    lines += [f"## CERTIFICATE PRODUCTS — OID ({len(certs)} items)",
-              "All products on the current USDA Organic Integrity Database certificate:", ""]
+    # ── OID certificate ────────────────────────────────────────────────────
+    lines += [f"## OID CERTIFICATE PRODUCTS ({len(certs)} items)",
+              "All products on the current USDA Organic Integrity Database certificate.", ""]
     for i, item in enumerate(certs, 1):
         lines.append(f"{i}. {item}")
 
@@ -360,9 +413,13 @@ GLOBAL_CSS = """
   .badge {
     font-size: .66rem; padding: 1px 7px; border-radius: 8px; font-weight: 700; border: 1px solid;
   }
-  .red   .badge { background: rgba(255,68,85,.08); border-color: rgba(255,68,85,.2); color: var(--red); }
-  .green .badge { background: rgba(0,255,127,.07); border-color: rgba(0,255,127,.15); color: var(--neon); }
-  .cyan  .badge { background: rgba(0,229,204,.07); border-color: rgba(0,229,204,.15); color: var(--cyan); }
+  .red    .badge { background: rgba(255,68,85,.08); border-color: rgba(255,68,85,.2); color: var(--red); }
+  .green  .badge { background: rgba(0,255,127,.07); border-color: rgba(0,255,127,.15); color: var(--neon); }
+  .cyan   .badge { background: rgba(0,229,204,.07); border-color: rgba(0,229,204,.15); color: var(--cyan); }
+  .amber  .badge { background: rgba(255,208,96,.07); border-color: rgba(255,208,96,.18); color: var(--amber); }
+  .orange .badge { background: rgba(255,140,0,.07); border-color: rgba(255,140,0,.18); color: #ff8c00; }
+  .section-label.amber  { color: var(--amber); }
+  .section-label.orange { color: #ff8c00; }
 
   .product-list { list-style: none; display: grid; gap: 4px; }
   .product-list li {
@@ -380,6 +437,15 @@ GLOBAL_CSS = """
     background: rgba(0,229,204,.025); border-left: 3px solid rgba(0,229,204,.18);
     color: var(--muted);
   }
+  .product-list li.caution-item {
+    background: rgba(255,208,96,.04); border-left: 3px solid rgba(255,208,96,.3);
+    box-shadow: inset 0 0 12px rgba(255,208,96,.05);
+  }
+  .product-list li.marketing-item {
+    background: rgba(255,140,0,.04); border-left: 3px solid rgba(255,140,0,.28);
+  }
+  .caution-icon  { color: var(--amber); flex-shrink: 0; }
+  .marketing-icon { color: #ff8c00; flex-shrink: 0; }
   .product-list a { color: var(--red); font-weight: 600; text-decoration: none; border-bottom: 1px solid rgba(255,68,85,.3); }
   .product-list a:hover { border-bottom-color: var(--red); }
   .product-list .no-link { color: var(--text); }
@@ -525,6 +591,65 @@ GLOBAL_CSS = """
     background: rgba(0,229,204,.04); border: 1px dashed rgba(0,229,204,.15);
     border-radius: 8px; font-size: .8rem; color: var(--muted); line-height: 1.5;
   }
+
+  /* ── Session stats counter ──────────────────────────────────────────── */
+  .stats-counter {
+    display: grid; grid-template-columns: repeat(3,1fr);
+    gap: 10px; margin-bottom: 22px;
+  }
+  .sc-box {
+    background: rgba(0,0,0,.38); border: 1px solid rgba(0,255,127,.07);
+    border-radius: 10px; padding: 13px 14px; text-align: center;
+  }
+  .sc-num { font-size: 1.55rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .sc-lbl { font-size: .62rem; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .07em; }
+  .sc-box.sc-checks .sc-num { color: var(--text); }
+  .sc-box.sc-flags  .sc-num { color: var(--red);  text-shadow: 0 0 14px rgba(255,68,85,.4); }
+  .sc-box.sc-fines  .sc-num { color: var(--neon); text-shadow: 0 0 16px rgba(0,255,127,.4); font-size: 1.15rem; }
+
+  /* ── Progress panel ──────────────────────────────────────────────────── */
+  .ps-header {
+    font-size: .72rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .09em; color: var(--muted); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ps-spin { display: inline-block; animation: spin 1.1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .progress-step {
+    display: flex; align-items: center; gap: 14px;
+    padding: 9px 0; border-bottom: 1px solid rgba(0,255,127,.05);
+    transition: opacity .3s;
+  }
+  .progress-step:last-child { border-bottom: none; }
+
+  .ps-num {
+    width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .72rem; font-weight: 800; transition: all .3s;
+  }
+  .ps-pending .ps-num { background: rgba(255,255,255,.04); color: var(--dim); border: 1px solid rgba(255,255,255,.07); }
+  .ps-active  .ps-num { background: rgba(0,255,127,.1); color: var(--neon); border: 1px solid rgba(0,255,127,.3); box-shadow: 0 0 12px rgba(0,255,127,.25); animation: pulse 1.4s ease-in-out infinite; }
+  .ps-done    .ps-num { background: rgba(0,255,127,.14); color: var(--neon); border: 1px solid rgba(0,255,127,.22); }
+
+  .ps-info  { flex: 1; }
+  .ps-name  { font-size: .83rem; font-weight: 600; transition: color .3s; }
+  .ps-msg   { font-size: .72rem; color: var(--muted); margin-top: 2px; min-height: 14px; }
+  .ps-pending .ps-name { color: var(--dim); }
+  .ps-active  .ps-name { color: var(--neon); }
+  .ps-done    .ps-name { color: var(--muted); }
+
+  .ps-bar { width: 90px; height: 3px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .ps-fill { height: 100%; border-radius: 2px; transition: width .6s ease, background .4s; }
+  .ps-pending .ps-fill { width: 0; background: transparent; }
+  .ps-active  .ps-fill {
+    width: 65%;
+    background: linear-gradient(90deg, var(--neon-dark) 0%, var(--neon) 50%, var(--neon-dark) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes shimmer { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
+  .ps-done .ps-fill { width: 100%; background: var(--neon-dim); }
 
   /* ── Hero banner (main page) ─────────────────────────────────────────── */
   .hero-banner {
@@ -699,35 +824,45 @@ REPORT_PARTIAL = """
     <div class="meta-item" style="grid-column:span 2"><label>Website</label><span><a href="{{ report.website_url }}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(0,229,204,.3)">{{ report.website_url }}</a></span></div>
   </div>
 
-  <div class="stats">
-    <div class="stat">
-      <div class="num">{{ report.cert_product_count }}</div>
-      <div class="lbl">OID Certified</div>
+  {# 6-box summary grid #}
+  <div style="display:grid;grid-template-columns:repeat(3,1fr) repeat(3,1fr);gap:8px;margin-bottom:26px">
+    <div class="stat" style="grid-column:span 2">
+      <div class="num" style="font-size:1.5rem">{{ report.cert_product_count }}</div>
+      <div class="lbl">Cert Products</div>
     </div>
-    <div class="stat">
-      <div class="num">{{ report.website_organic_count }}</div>
-      <div class="lbl">Website Organic</div>
+    <div class="stat" style="grid-column:span 2">
+      <div class="num" style="font-size:1.5rem">{{ report.website_organic_count }}</div>
+      <div class="lbl">Site Organic Claims</div>
     </div>
-    <div class="stat verified">
-      <div class="num">{{ report.verified | length }}</div>
-      <div class="lbl">Verified</div>
+    <div class="stat verified" style="grid-column:span 2">
+      <div class="num" style="font-size:1.5rem">{{ report.verified | length }}</div>
+      <div class="lbl">Confirmed OK &#10003;</div>
     </div>
-    <div class="stat flagged">
-      <div class="num">{{ report.flagged | length }}</div>
-      <div class="lbl">Flagged</div>
+    <div class="stat flagged" style="grid-column:span 2">
+      <div class="num" style="font-size:1.5rem">{{ report.flagged | length }}</div>
+      <div class="lbl">&#128308; Non-Compliance Risk</div>
+    </div>
+    <div class="stat" style="grid-column:span 2;border-color:rgba(255,208,96,.18);background:rgba(255,208,96,.04)">
+      <div class="num" style="font-size:1.5rem;color:var(--amber)">{{ report.caution | length }}</div>
+      <div class="lbl">&#128993; Caution</div>
+    </div>
+    <div class="stat" style="grid-column:span 2;border-color:rgba(255,140,0,.18);background:rgba(255,140,0,.03)">
+      <div class="num" style="font-size:1.5rem;color:#ff8c00">{{ report.marketing | length }}</div>
+      <div class="lbl">&#128992; Marketing Review</div>
     </div>
   </div>
 
-  {# ── Flags ─────────────────────────────────────────────────── #}
+  {# ── 🔴 Non-compliance risk ────────────────────────────────── #}
   {% if report.flagged %}
     <div class="section-label red">
-      &#9888; Non-Compliance Flags
+      &#128308; Non-Compliance Risk
       <span class="badge">{{ report.flagged | length }}</span>
     </div>
-    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-      Marketed as organic on the website — NOT found on the OID certificate
+    <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;line-height:1.55">
+      Specific products labeled <em>organic</em> on the website but <strong>NOT found on the current OID certificate</strong>.<br>
+      <span style="font-size:.7rem;opacity:.7">Ref: 7 CFR &sect;&nbsp;205.307 (misrepresentation &amp; fraud) &bull; &sect;&nbsp;205.303&ndash;305 (labeling)</span>
     </p>
-    <ul class="product-list" style="margin-bottom:0">
+    <ul class="product-list">
       {% for item in report.flagged | sort(attribute='title') %}
         <li class="flag-item">
           &#9888;
@@ -741,25 +876,73 @@ REPORT_PARTIAL = """
       {% endfor %}
     </ul>
   {% else %}
-    <div class="clean">&#10003; No flags — all organic-labeled products match the OID certificate.</div>
+    <div class="clean">&#10003; No non-compliance flags &mdash; all specific organic product claims match the OID certificate.</div>
   {% endif %}
 
-  {# ── All website organic products ──────────────────────────── #}
-  <div class="section-label green" style="margin-top:28px">
-    Website Organic Products
-    <span class="badge">{{ report.website_organic_count }}</span>
+  {# ── 🟡 Caution — name variations ─────────────────────────── #}
+  {% if report.caution %}
+    <div class="section-label amber" style="margin-top:22px">
+      &#128993; Caution &mdash; Name Variation
+      <span class="badge">{{ report.caution | length }}</span>
+    </div>
+    <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;line-height:1.55">
+      Products that closely resemble certified items but may have name differences (e.g.&nbsp;<em>Flax Oil</em> vs&nbsp;<em>Flaxseed Oil</em>).
+      Not an NOP violation &mdash; requires certifier review for alignment.<br>
+      <span style="font-size:.7rem;opacity:.7">Sub-category: name variation &bull; possible mismatch &bull; certifier judgment required</span>
+    </p>
+    <ul class="product-list scrollable-list">
+      {% for item in report.caution | sort(attribute='title') %}
+        <li class="caution-item">
+          <span class="caution-icon">&#126;</span>
+          {% if item.url %}
+            <a href="{{ item.url }}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:none;border-bottom:1px solid rgba(255,208,96,.3)">{{ item.title }}</a>
+          {% else %}
+            <span class="no-link">{{ item.title }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {# ── 🟠 Marketing language ─────────────────────────────────── #}
+  {% if report.marketing %}
+    <div class="section-label orange" style="margin-top:22px">
+      &#128992; Marketing Language Review
+      <span class="badge">{{ report.marketing | length }}</span>
+    </div>
+    <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;line-height:1.55">
+      Uses <em>organic</em> as marketing / category language rather than a specific product claim.
+      Certifier should have approved this language in the Organic System Plan.<br>
+      <span style="font-size:.7rem;opacity:.7">Ref: 7 CFR &sect;&nbsp;205.305&ndash;306 (<em>made with organic</em>) &bull; USDA NOP Guidance Doc&nbsp;5001</span>
+    </p>
+    <ul class="product-list scrollable-list">
+      {% for item in report.marketing | sort(attribute='title') %}
+        <li class="marketing-item">
+          <span class="marketing-icon">&#9900;</span>
+          {% if item.url %}
+            <a href="{{ item.url }}" target="_blank" rel="noopener" style="color:#ff8c00;text-decoration:none;border-bottom:1px solid rgba(255,140,0,.3)">{{ item.title }}</a>
+          {% else %}
+            <span class="no-link">{{ item.title }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {# ── ✅ Confirmed compliant ────────────────────────────────── #}
+  <div class="section-label green" style="margin-top:22px">
+    &#10003; Confirmed on Certificate
+    <span class="badge">{{ report.verified | length }}</span>
   </div>
-  <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-    All products found on the website labeled organic. &#10003; = on certificate &nbsp; &#9888; = not on certificate
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px">
+    Website organic products that match the current OID certificate &mdash; confirmed compliant.
   </p>
   <ul class="product-list scrollable-list">
-    {% set all_site = (report.verified + report.flagged) | sort(attribute='title') %}
-    {% for item in all_site %}
-      {% set is_flag = item in report.flagged %}
-      <li class="{{ 'flag-item' if is_flag else 'ok-item' }}">
-        {{ '&#9888;' if is_flag else '&#10003;' }}
+    {% for item in report.verified | sort(attribute='title') %}
+      <li class="ok-item">
+        <span class="check-icon">&#10003;</span>
         {% if item.url %}
-          <a href="{{ item.url }}" target="_blank" rel="noopener" style="{{ 'color:var(--red)' if is_flag else 'color:var(--neon)' }}">{{ item.title }}</a>
+          <a href="{{ item.url }}" target="_blank" rel="noopener" style="color:var(--neon);text-decoration:none">{{ item.title }}</a>
         {% else %}
           <span class="no-link">{{ item.title }}</span>
         {% endif %}
@@ -768,11 +951,11 @@ REPORT_PARTIAL = """
   </ul>
 
   {# ── OID certificate products ──────────────────────────────── #}
-  <div class="section-label cyan" style="margin-top:28px">
+  <div class="section-label cyan" style="margin-top:22px">
     OID Certificate Products
     <span class="badge">{{ report.cert_product_count }}</span>
   </div>
-  <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px">
     All products on the current USDA Organic Integrity Database certificate
   </p>
   <ul class="product-list scrollable-list">
@@ -842,6 +1025,58 @@ MAIN_HTML = """<!DOCTYPE html>
     <div class="hero-text">Catch every non-compliant organic claim before it becomes a USDA penalty &mdash; automatic website audits against your live organic certificate.</div>
     <a href="/about" class="hero-learn">Learn more &rarr;</a>
   </div>
+
+  <div class="stats-counter" id="statsCounter">
+    <div class="sc-box sc-checks">
+      <div class="sc-num" id="scChecks">0</div>
+      <div class="sc-lbl">Checks This Session</div>
+    </div>
+    <div class="sc-box sc-flags">
+      <div class="sc-num" id="scFlags">0</div>
+      <div class="sc-lbl">Flags Detected</div>
+    </div>
+    <div class="sc-box sc-fines">
+      <div class="sc-num" id="scFines">$0</div>
+      <div class="sc-lbl">Est. Penalties Avoided</div>
+    </div>
+  </div>
+
+  <div class="card" id="progressPanel" style="display:none">
+    <div class="ps-header">Running Checker <span class="ps-spin">&#8635;</span></div>
+    <div id="pstep1" class="progress-step ps-pending">
+      <div class="ps-num">1</div>
+      <div class="ps-info">
+        <div class="ps-name">Connect to USDA Organic Integrity Database</div>
+        <div class="ps-msg" id="pmsg1">Waiting&hellip;</div>
+      </div>
+      <div class="ps-bar"><div class="ps-fill"></div></div>
+    </div>
+    <div id="pstep2" class="progress-step ps-pending">
+      <div class="ps-num">2</div>
+      <div class="ps-info">
+        <div class="ps-name">Load OID certificate</div>
+        <div class="ps-msg" id="pmsg2">&mdash;</div>
+      </div>
+      <div class="ps-bar"><div class="ps-fill"></div></div>
+    </div>
+    <div id="pstep3" class="progress-step ps-pending">
+      <div class="ps-num">3</div>
+      <div class="ps-info">
+        <div class="ps-name">Scan website for organic product claims</div>
+        <div class="ps-msg" id="pmsg3">&mdash;</div>
+      </div>
+      <div class="ps-bar"><div class="ps-fill"></div></div>
+    </div>
+    <div id="pstep4" class="progress-step ps-pending">
+      <div class="ps-num">4</div>
+      <div class="ps-info">
+        <div class="ps-name">Compare claims against certificate</div>
+        <div class="ps-msg" id="pmsg4">&mdash;</div>
+      </div>
+      <div class="ps-bar"><div class="ps-fill"></div></div>
+    </div>
+  </div>
+
   <div class="card">
     <form id="checkForm">
       <label for="operation">Operation Name (as listed in OID)</label>
@@ -893,18 +1128,73 @@ MAIN_HTML = """<!DOCTYPE html>
     startPolling(data.job_id);
   });
 
-  // ── Poll active job ──────────────────────────────────────────────────────
+  // ── Progress panel ───────────────────────────────────────────────────────
+  const STEP_NAMES = [
+    '', // 1-indexed
+    'Connect to USDA Organic Integrity Database',
+    'Load OID certificate',
+    'Scan website for organic product claims',
+    'Compare claims against certificate',
+  ];
+  function updateProgress(job) {
+    const panel = document.getElementById('progressPanel');
+    if (!panel) return;
+    const cur = job.step || 0;
+    if (job.status === 'queued' || job.status === 'running') {
+      panel.style.display = 'block';
+      for (let i = 1; i <= 4; i++) {
+        const el  = document.getElementById('pstep' + i);
+        const msg = document.getElementById('pmsg' + i);
+        if (!el) continue;
+        if (i < cur) {
+          el.className = 'progress-step ps-done';
+          el.querySelector('.ps-num').textContent = '\u2713';
+          if (msg) msg.textContent = 'Done';
+        } else if (i === cur) {
+          el.className = 'progress-step ps-active';
+          el.querySelector('.ps-num').textContent = String(i);
+          if (msg && job.step_msg) msg.textContent = job.step_msg;
+        } else {
+          el.className = 'progress-step ps-pending';
+          el.querySelector('.ps-num').textContent = String(i);
+          if (msg) msg.textContent = '\u2014';
+        }
+      }
+    } else {
+      panel.style.display = 'none';
+    }
+  }
+
+  // ── Stats counter ────────────────────────────────────────────────────────
+  async function refreshStats() {
+    try {
+      const s = await (await fetch('/stats')).json();
+      document.getElementById('scChecks').textContent = s.checks_run.toLocaleString();
+      document.getElementById('scFlags').textContent  = s.flags_found.toLocaleString();
+      const f = s.fines_avoided;
+      document.getElementById('scFines').textContent  =
+        f >= 1000000 ? '$' + (f/1000000).toFixed(2) + 'M'
+        : f >= 1000  ? '$' + (f/1000).toFixed(1) + 'K'
+        : '$' + f.toLocaleString();
+    } catch(e) {}
+  }
+
+  // ── Poll active job ───────────────────────────────────────────────────────
   function startPolling(jobId) {
     clearInterval(pollTimer);
+    document.getElementById('progressPanel').style.display = 'block';
     pollTimer = setInterval(async () => {
       const res = await fetch('/job/' + jobId);
       const job = await res.json();
+      updateProgress(job);
       if (job.status === 'done' || job.status === 'error') {
         clearInterval(pollTimer);
+        document.getElementById('progressPanel').style.display = 'none';
         loadResult(jobId);
         refreshQueue();
+        refreshStats();
       }
-    }, 3000);
+    }, 2000);
   }
 
   async function loadResult(jobId) {
@@ -945,7 +1235,9 @@ MAIN_HTML = """<!DOCTYPE html>
 
   if (ACTIVE_JOB) startPolling(ACTIVE_JOB);
   refreshQueue();
+  refreshStats();
   setInterval(refreshQueue, 5000);
+  setInterval(refreshStats, 10000);
 </script>
 </body>
 </html>"""
@@ -1247,6 +1539,14 @@ def jobs_list():
     with jobs_lock:
         result = [{k: v for k, v in j.items() if k != 'report'} for j in jobs.values()]
     return jsonify(sorted(result, key=lambda x: x['submitted_at'], reverse=True))
+
+
+@app.route('/stats')
+def get_stats():
+    with jobs_lock:
+        s = dict(stats)
+    s['fines_avoided'] = s['flags_found'] * 22974
+    return jsonify(s)
 
 
 @app.route('/job/<job_id>/download/md')
