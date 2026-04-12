@@ -239,7 +239,7 @@ GLOBAL_CSS = """
     --red:       #ff4455;
     --red-glow:  rgba(255, 68, 85, 0.12);
     --text:      #cce8d0;
-    --muted:     #4d7a5a;
+    --muted:     #8ab89a;
     --dim:       #2a4a32;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -851,6 +851,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
       <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">About</a>
       <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
       <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
+      <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">Agents</a>
       <a href="/account" class="nav-link {{ 'active' if active == 'account' else '' }}">Account</a>
     </nav>
     <div class="header-icon-wrap">
@@ -861,6 +862,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
         <a class="dropdown-item" href="/account">Account</a>
         <a class="dropdown-item" href="/history">Web Check History</a>
         <a class="dropdown-item" href="/pricing">Pricing Plan</a>
+        <a class="dropdown-item" href="/agents">Agents &amp; API</a>
         <a class="dropdown-item" href="/settings">Settings</a>
       </div>
     </div>
@@ -1084,6 +1086,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <a href="/about"   class="nav-link">About</a>
       <a href="/history" class="nav-link">History</a>
       <a href="/pricing" class="nav-link">Pricing</a>
+      <a href="/agents"  class="nav-link">Agents</a>
       <a href="/account" class="nav-link">Account</a>
     </nav>
     <div class="header-icon-wrap">
@@ -1094,6 +1097,7 @@ MAIN_HTML = """<!DOCTYPE html>
         <a class="dropdown-item" href="/account">Account</a>
         <a class="dropdown-item" href="/history">Web Check History</a>
         <a class="dropdown-item" href="/pricing">Pricing Plan</a>
+        <a class="dropdown-item" href="/agents">Agents &amp; API</a>
         <a class="dropdown-item" href="/settings">Settings</a>
       </div>
     </div>
@@ -1568,19 +1572,6 @@ ABOUT_BODY = """
   </div>
 </div>
 
-<div class="card">
-  <div class="certbridge-badge">CertBridge-Ready</div>
-  <div class="about-section-title">&#9670; Part of a Larger Ecosystem</div>
-  <div class="about-p">
-    Organic Web Checker is built to integrate into a continuous compliance ecosystem:
-  </div>
-  <ul class="feature-list">
-    <li>&#8635; Continuous monitoring &mdash; not just one-time audits</li>
-    <li>&#9993; Automated alerts and remediation guidance</li>
-    <li>&#129302; Agent-driven compliance workflows, designed for AI integration</li>
-  </ul>
-</div>
-
 <div class="card" style="text-align:center;padding:36px 28px">
   <div class="about-bottom-line">
     Your website is part of your Organic System Plan&thinsp;&mdash;&thinsp;whether you treat it that way or not.
@@ -1938,6 +1929,191 @@ def history():
 def settings():
     return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
                                   page_title='Settings', active='settings', body=SETTINGS_BODY)
+
+
+# ---------------------------------------------------------------------------
+# Agents & API page
+# ---------------------------------------------------------------------------
+
+AGENTS_BODY = """
+<div class="page-title">Agents &amp; API</div>
+<div class="page-subtitle">Organic Web Checker is built to be used by AI agents and automated compliance workflows &mdash; not just humans.</div>
+
+<div class="card">
+  <div class="about-section-title">&#129302; AI Agent-Friendly</div>
+  <div class="about-p">
+    Every check you run through the web interface is also available programmatically. AI agents can submit checks, poll for results, and receive structured JSON reports &mdash; enabling automated compliance monitoring at scale.
+  </div>
+  <ul class="feature-list">
+    <li>&#10003; Structured JSON output &mdash; every report is machine-readable</li>
+    <li>&#10003; Async job queue &mdash; submit and poll, no blocking</li>
+    <li>&#10003; Markdown and PDF export endpoints</li>
+    <li>&#8680; API key authentication &mdash; coming soon</li>
+    <li>&#8680; MCP (Model Context Protocol) server &mdash; coming soon</li>
+  </ul>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9656; Current API Endpoints</div>
+  <div class="about-p" style="margin-bottom:14px">These endpoints are used by the web interface and are accessible to agents during development. API key auth will be required once gating is live.</div>
+
+  <div class="api-endpoint">
+    <div class="api-method post">POST</div>
+    <div class="api-path">/check</div>
+    <div class="api-desc">Submit a new web check. Body: <code>operation</code> (OID name), <code>website</code> (URL). Returns: <code>&#123;"job_id": "..."&#125;</code></div>
+  </div>
+
+  <div class="api-endpoint">
+    <div class="api-method get">GET</div>
+    <div class="api-path">/job/&lt;job_id&gt;</div>
+    <div class="api-desc">Poll job status. Returns full JSON report when <code>status</code> is <code>done</code>. Fields: <code>flagged</code>, <code>caution</code>, <code>verified</code>, <code>marketing</code>, <code>cert_product_count</code>, <code>website_organic_count</code>.</div>
+  </div>
+
+  <div class="api-endpoint">
+    <div class="api-method get">GET</div>
+    <div class="api-path">/jobs</div>
+    <div class="api-desc">List all jobs in current queue. Returns array of job objects (without report data).</div>
+  </div>
+
+  <div class="api-endpoint">
+    <div class="api-method get">GET</div>
+    <div class="api-path">/job/&lt;job_id&gt;/download/md</div>
+    <div class="api-desc">Download the compliance report as a Markdown file.</div>
+  </div>
+
+  <div class="api-endpoint">
+    <div class="api-method get">GET</div>
+    <div class="api-path">/api/credits</div>
+    <div class="api-desc">Returns current session credit balance: <code>&#123;"credits": N, "has_account": bool&#125;</code></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#128274; Security</div>
+  <div class="about-p">Current and planned protections:</div>
+  <ul class="feature-list">
+    <li>&#10003; Stripe webhook signature verification (HMAC-SHA256)</li>
+    <li>&#10003; Input sanitization &mdash; operation name and URL validated before processing</li>
+    <li>&#8680; API key authentication per request &mdash; coming with account system</li>
+    <li>&#8680; Rate limiting per key &mdash; prevents runaway agent usage</li>
+    <li>&#8680; Agent registration &mdash; named agents tied to an account for audit logging</li>
+  </ul>
+  <div class="about-p" style="margin-top:12px;font-size:.8rem;">
+    There is no formal agent identity standard yet. We follow current best practice: API keys + HMAC-signed webhooks. We will adopt emerging standards (e.g., OpenID for agents) as they mature.
+  </div>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9670; Coming Soon</div>
+  <ul class="feature-list">
+    <li>&#8680; <strong>MCP server</strong> &mdash; run checkers natively inside Claude, Cursor, and other MCP-compatible agents</li>
+    <li>&#8680; <strong>API keys</strong> &mdash; generate and manage keys from your account dashboard</li>
+    <li>&#8680; <strong>Webhooks</strong> &mdash; push results to your system when a check completes</li>
+    <li>&#8680; <strong>Batch endpoint</strong> &mdash; submit multiple operations in one call</li>
+    <li>&#8680; <strong>OpenAPI spec</strong> &mdash; machine-readable API documentation</li>
+  </ul>
+  <div style="margin-top:18px">
+    <a href="mailto:hello@organicwebcheck.com" class="pricing-cta contact" style="display:inline-block;padding:10px 20px;font-size:.84rem">
+      Request early API access
+    </a>
+  </div>
+</div>
+"""
+
+AGENTS_CSS = """
+  .api-endpoint {
+    display: grid; grid-template-columns: 60px 220px 1fr;
+    gap: 10px; align-items: start;
+    padding: 12px 0; border-bottom: 1px solid rgba(0,255,127,.06);
+    font-size: .82rem;
+  }
+  .api-endpoint:last-child { border-bottom: none; }
+  .api-method {
+    font-size: .65rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; padding: 3px 7px; border-radius: 4px;
+    text-align: center; width: fit-content;
+  }
+  .api-method.post { background: rgba(255,208,96,.12); color: var(--amber); border: 1px solid rgba(255,208,96,.2); }
+  .api-method.get  { background: rgba(0,255,127,.07);  color: var(--neon);  border: 1px solid rgba(0,255,127,.15); }
+  .api-path { font-family: monospace; font-size: .82rem; color: var(--cyan); padding-top: 2px; }
+  .api-desc { color: var(--muted); line-height: 1.5; }
+  .api-desc code { background: rgba(0,255,127,.07); color: var(--neon); padding: 1px 5px; border-radius: 3px; font-size: .78rem; }
+"""
+
+@app.route('/agents')
+def agents():
+    combined_css = GLOBAL_CSS + AGENTS_CSS
+    return render_template_string(BASE_TEMPLATE, css=combined_css,
+                                  page_title='Agents & API', active='agents', body=AGENTS_BODY)
+
+
+@app.route('/llms.txt')
+def llms_txt():
+    content = """# Organic Web Checker
+# https://organicwebcheck.up.railway.app
+# Contact: hello@organicwebcheck.com
+
+## What this tool does
+Organic Web Checker compares a business's website organic product listings against their
+live USDA Organic Integrity Database (OID) certificate. It identifies product titles that
+appear as organic on the website but are not found on the current OID certificate scope.
+
+Results are for review purposes only. This tool is informational — not a legal audit.
+
+## Who it is for
+- Organic certifiers auditing client operations
+- Certified organic handlers and brands reviewing their own claims
+- Compliance consultants managing multiple operations
+
+## How to use the API (no auth required during development)
+
+### Submit a check
+POST /check
+Content-Type: application/x-www-form-urlencoded
+Body: operation=OPERATION+NAME+AS+IN+OID&website=https://example.com
+Response: {"job_id": "abc12345"}
+
+### Poll for results
+GET /job/<job_id>
+Response when running: {"status": "queued"|"running", ...}
+Response when done:    {"status": "done", "report": {...}}
+
+### Report JSON structure
+{
+  "operation": "string — operation name from OID",
+  "certifier": "string — certifying agent name",
+  "status": "string — certification status",
+  "location": "string — city, state",
+  "website_url": "string",
+  "cert_product_count": integer,
+  "website_organic_count": integer,
+  "flagged":   [{"title": "...", "url": "..."}],
+  "caution":   [{"title": "...", "url": "..."}],
+  "verified":  [{"title": "...", "url": "..."}],
+  "marketing": [{"title": "...", "url": "..."}]
+}
+
+### List all jobs
+GET /jobs
+
+### Download report as Markdown
+GET /job/<job_id>/download/md
+
+## Important limitations
+- Matches only product titles containing the word "organic"
+- Uses fuzzy/substring matching — results require human review
+- One check runs at a time (queue-based, ~60 seconds per check)
+- Job queue is in-memory — clears on server restart
+- Credits required for production use (see /pricing)
+
+## Coming soon
+- API key authentication
+- MCP (Model Context Protocol) server for native agent tool use
+- Batch endpoint for multiple operations
+- Webhooks for push results
+- OpenAPI spec at /openapi.json
+"""
+    return Response(content, mimetype='text/plain')
 
 
 @app.route('/about')
