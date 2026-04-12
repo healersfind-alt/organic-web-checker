@@ -5,11 +5,81 @@ Organic Web Checker — Flask web app
 import os
 import uuid
 import threading
+import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from flask import Flask, request, render_template_string, send_from_directory, jsonify, Response
+from flask import Flask, request, render_template_string, send_from_directory, jsonify, Response, session
 from checker import run_check
+import stripe
+import psycopg2
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-in-prod')
+
+# ---------------------------------------------------------------------------
+# Stripe config
+# ---------------------------------------------------------------------------
+
+stripe.api_key         = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_PK              = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
+STRIPE_WH_SECRET       = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+DATABASE_URL           = os.environ.get('DATABASE_URL', '')
+APP_BASE_URL           = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'organicwebcheck.up.railway.app')
+if not APP_BASE_URL.startswith('http'):
+    APP_BASE_URL = 'https://' + APP_BASE_URL
+
+# ---------------------------------------------------------------------------
+# Postgres helpers
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def db_conn():
+    conn = None
+    try:
+        url = DATABASE_URL
+        if url.startswith('postgres://'):
+            url = url.replace('postgres://', 'postgresql://', 1)
+        conn = psycopg2.connect(url)
+        yield conn
+    finally:
+        if conn:
+            conn.close()
+
+def init_db():
+    if not DATABASE_URL:
+        return
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS credit_accounts (
+                    token TEXT PRIMARY KEY,
+                    credits_remaining INTEGER NOT NULL DEFAULT 0,
+                    total_purchased   INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS purchases (
+                    id SERIAL PRIMARY KEY,
+                    token             TEXT NOT NULL,
+                    stripe_session_id TEXT UNIQUE NOT NULL,
+                    tier_name         TEXT,
+                    credits_purchased INTEGER NOT NULL,
+                    amount_paid_cents INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+        conn.commit()
+
+try:
+    init_db()
+except Exception as _db_err:
+    print(f'[WARN] DB init skipped: {_db_err}')
+
+def get_session_token():
+    if 'token' not in session:
+        session['token'] = uuid.uuid4().hex
+    return session['token']
 
 # ---------------------------------------------------------------------------
 # Job queue (in-memory, single-server)
@@ -1277,7 +1347,7 @@ TIERS = [
 
 def pricing_page_html():
     cards = ""
-    for t in TIERS:
+    for i, t in enumerate(TIERS):
         feat = ' featured' if t['featured'] else ''
         disc = t['disc'] if t['disc'] else '—'
         disc_cls = '' if t['disc'] else ' none'
@@ -1292,7 +1362,7 @@ def pricing_page_html():
           <div class="pricing-per">${t['per']:.2f} per checker</div>
           <div class="pricing-disc{disc_cls}">{disc}</div>
           <div class="pricing-desc">{t['desc']}</div>
-          <a href="#" class="pricing-cta" onclick="return comingSoon()">Purchase</a>
+          <a href="#" class="pricing-cta" id="buy-{i}" onclick="return buyTier({i})">Purchase</a>
         </div>"""
 
     custom = """
@@ -1321,10 +1391,30 @@ def pricing_page_html():
       {cards}
       {custom}
     </div>
-    <div class="coming-soon-note">
-      <strong>Payments launching soon.</strong> Stripe integration is in progress. To get early access or be notified at launch, email <a href="mailto:hello@organicwebcheck.com" style="color:var(--amber);text-decoration:none">hello@organicwebcheck.com</a>
-    </div>
-    <script>function comingSoon(){{alert('Payments launching soon. Email hello@organicwebcheck.com for early access.');return false;}}</script>"""
+    <script>
+    async function buyTier(i) {{
+      const btn = document.getElementById('buy-' + i);
+      if (btn) {{ btn.textContent = 'Redirecting\u2026'; btn.style.opacity = '0.7'; btn.style.pointerEvents = 'none'; }}
+      try {{
+        const res  = await fetch('/create-checkout-session', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{tier_index: i}})
+        }});
+        const data = await res.json();
+        if (data.url) {{
+          window.location.href = data.url;
+        }} else {{
+          alert('Checkout error: ' + (data.error || 'Please try again.'));
+          if (btn) {{ btn.textContent = 'Purchase'; btn.style.opacity = ''; btn.style.pointerEvents = ''; }}
+        }}
+      }} catch(e) {{
+        alert('Network error — please try again.');
+        if (btn) {{ btn.textContent = 'Purchase'; btn.style.opacity = ''; btn.style.pointerEvents = ''; }}
+      }}
+      return false;
+    }}
+    </script>"""
 
 
 # ---------------------------------------------------------------------------
@@ -1567,6 +1657,137 @@ def get_stats():
         s = dict(stats)
     s['items_for_review'] = s['flags_found'] + s['caution_found']
     return jsonify(s)
+
+
+# ---------------------------------------------------------------------------
+# Stripe payment routes
+# ---------------------------------------------------------------------------
+
+@app.route('/create-checkout-session', methods=['POST'])
+def create_checkout_session():
+    try:
+        data = request.get_json(force=True) or {}
+        tier_index = int(data.get('tier_index', -1))
+        if tier_index < 0 or tier_index >= len(TIERS):
+            return jsonify({'error': 'Invalid tier'}), 400
+        tier  = TIERS[tier_index]
+        token = get_session_token()
+        checkout = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': f'Organic Web Checker \u2014 {tier["name"]}',
+                        'description': f'{tier["count"]} checker{"s" if tier["count"] > 1 else ""} \u00b7 credits never expire',
+                    },
+                    'unit_amount': round(tier['price'] * 100),
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            client_reference_id=token,
+            metadata={'tier_name': tier['name'], 'credits': str(tier['count'])},
+            success_url=APP_BASE_URL + '/success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=APP_BASE_URL + '/pricing',
+        )
+        return jsonify({'url': checkout.url})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/stripe-webhook', methods=['POST'])
+def stripe_webhook():
+    payload    = request.get_data()
+    sig_header = request.headers.get('Stripe-Signature', '')
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WH_SECRET)
+    except (ValueError, stripe.error.SignatureVerificationError):
+        return '', 400
+
+    if event['type'] == 'checkout.session.completed':
+        obj               = event['data']['object']
+        token             = obj.get('client_reference_id', '')
+        credits           = int(obj.get('metadata', {}).get('credits', 0))
+        tier_name         = obj.get('metadata', {}).get('tier_name', '')
+        stripe_session_id = obj['id']
+        amount_cents      = obj.get('amount_total', 0)
+        if token and credits > 0 and DATABASE_URL:
+            try:
+                with db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO credit_accounts (token, credits_remaining, total_purchased)
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (token) DO UPDATE SET
+                                credits_remaining = credit_accounts.credits_remaining + EXCLUDED.credits_remaining,
+                                total_purchased   = credit_accounts.total_purchased   + EXCLUDED.total_purchased
+                        """, (token, credits, credits))
+                        cur.execute("""
+                            INSERT INTO purchases
+                                (token, stripe_session_id, tier_name, credits_purchased, amount_paid_cents)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (stripe_session_id) DO NOTHING
+                        """, (token, stripe_session_id, tier_name, credits, amount_cents))
+                    conn.commit()
+            except Exception as e:
+                print(f'[WARN] Webhook DB write failed: {e}')
+    return '', 200
+
+
+@app.route('/api/credits')
+def api_credits():
+    token = session.get('token')
+    if not token or not DATABASE_URL:
+        return jsonify({'credits': 0, 'total_purchased': 0, 'has_account': False})
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT credits_remaining, total_purchased FROM credit_accounts WHERE token = %s',
+                    (token,)
+                )
+                row = cur.fetchone()
+        if row:
+            return jsonify({'credits': row[0], 'total_purchased': row[1], 'has_account': True})
+    except Exception:
+        pass
+    return jsonify({'credits': 0, 'total_purchased': 0, 'has_account': False})
+
+
+@app.route('/success')
+def success():
+    stripe_session_id = request.args.get('session_id', '')
+    token = session.get('token', '')
+    credits = 0
+    tier_name = ''
+    if stripe_session_id and stripe.api_key:
+        try:
+            cs = stripe.checkout.Session.retrieve(stripe_session_id)
+            credits   = int(cs.metadata.get('credits', 0))
+            tier_name = cs.metadata.get('tier_name', '')
+        except Exception:
+            pass
+    body = f"""
+<div style="text-align:center;padding:60px 20px">
+  <img src="/static/favicon.svg" style="width:72px;height:72px;margin-bottom:24px">
+  <div style="font-size:1.7rem;font-weight:900;color:var(--neon);margin-bottom:10px">Payment confirmed</div>
+  <div style="color:var(--text);font-size:1.05rem;margin-bottom:6px">
+    {f'<strong>{credits} checker{"s" if credits != 1 else ""}</strong> ({tier_name}) added to your account.' if credits else 'Your purchase was successful.'}
+  </div>
+  <div style="color:var(--muted);font-size:.82rem;margin-bottom:32px">
+    Credits are tied to this browser. Sign in with an account (coming soon) to access them anywhere.
+  </div>
+  <a href="/" class="cta-btn">Run a Checker &rarr;</a>
+</div>"""
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='Payment Confirmed', active='', body=body)
+
+
+@app.route('/cancel')
+def cancel():
+    from flask import redirect
+    return redirect('/pricing')
 
 
 @app.route('/job/<job_id>/download/md')
