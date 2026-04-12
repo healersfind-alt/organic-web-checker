@@ -1,18 +1,59 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90" width="90" height="90">
-  <!-- Brown rounded-corner border -->
-  <rect x="4" y="4" width="82" height="82" rx="16" ry="16"
-        fill="white" stroke="#6b3a2a" stroke-width="3.5"/>
-  <!-- 3x3 checkerboard, centered, 24px cells with 3px gap -->
-  <!-- Row 1: G W G -->
-  <rect x="11" y="11" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <rect x="34" y="11" width="22" height="22" rx="2" fill="white"/>
-  <rect x="57" y="11" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <!-- Row 2: W G W -->
-  <rect x="11" y="34" width="22" height="22" rx="2" fill="white"/>
-  <rect x="34" y="34" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <rect x="57" y="34" width="22" height="22" rx="2" fill="white"/>
-  <!-- Row 3: G W G -->
-  <rect x="11" y="57" width="22" height="22" rx="2" fill="#2d5a27"/>
-  <rect x="34" y="57" width="22" height="22" rx="2" fill="white"/>
-  <rect x="57" y="57" width="22" height="22" rx="2" fill="#2d5a27"/>
+  <defs>
+    <!-- Gold/bronze outer ring — top-left highlight, bottom-right shadow -->
+    <linearGradient id="goldRing" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%"   stop-color="#f5df70"/>
+      <stop offset="28%"  stop-color="#c8950a"/>
+      <stop offset="60%"  stop-color="#e4b820"/>
+      <stop offset="100%" stop-color="#7a5400"/>
+    </linearGradient>
+    <!-- Dark green background — radial, lighter at top-left -->
+    <radialGradient id="bgGreen" cx="36%" cy="32%" r="68%">
+      <stop offset="0%"   stop-color="#3d7838"/>
+      <stop offset="100%" stop-color="#142e12"/>
+    </radialGradient>
+    <!-- Metallic light green cells — top-left highlight -->
+    <linearGradient id="grnCell" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#c4e8b0"/>
+      <stop offset="40%"  stop-color="#62a855"/>
+      <stop offset="100%" stop-color="#2a5426"/>
+    </linearGradient>
+    <!-- Metallic silver-sage cells -->
+    <linearGradient id="whtCell" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#f2f9ef"/>
+      <stop offset="45%"  stop-color="#c8dcc4"/>
+      <stop offset="100%" stop-color="#8aaa86"/>
+    </linearGradient>
+    <!-- Clip to inner circle -->
+    <clipPath id="innerClip">
+      <circle cx="45" cy="45" r="37"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer gold ring -->
+  <circle cx="45" cy="45" r="44" fill="url(#goldRing)"/>
+  <!-- Thin darker inner edge of ring -->
+  <circle cx="45" cy="45" r="39" fill="none" stroke="#5a3c00" stroke-width="1.2" opacity="0.5"/>
+  <!-- Dark green background -->
+  <circle cx="45" cy="45" r="38" fill="url(#bgGreen)"/>
+
+  <!-- 3×3 checkerboard — 16px squares, 2px gaps, centered at 45,45 -->
+  <!-- Grid spans x:19–71, y:19–71 -->
+  <g clip-path="url(#innerClip)">
+    <!-- Row 1: G  W  G -->
+    <rect x="19" y="19" width="16" height="16" rx="1.5" fill="url(#grnCell)"/>
+    <rect x="37" y="19" width="16" height="16" rx="1.5" fill="url(#whtCell)"/>
+    <rect x="55" y="19" width="16" height="16" rx="1.5" fill="url(#grnCell)"/>
+    <!-- Row 2: W  G  W -->
+    <rect x="19" y="37" width="16" height="16" rx="1.5" fill="url(#whtCell)"/>
+    <rect x="37" y="37" width="16" height="16" rx="1.5" fill="url(#grnCell)"/>
+    <rect x="55" y="37" width="16" height="16" rx="1.5" fill="url(#whtCell)"/>
+    <!-- Row 3: G  W  G -->
+    <rect x="19" y="55" width="16" height="16" rx="1.5" fill="url(#grnCell)"/>
+    <rect x="37" y="55" width="16" height="16" rx="1.5" fill="url(#whtCell)"/>
+    <rect x="55" y="55" width="16" height="16" rx="1.5" fill="url(#grnCell)"/>
+  </g>
+
+  <!-- Subtle top-left sheen on the inner circle -->
+  <circle cx="45" cy="45" r="38" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
 </svg>

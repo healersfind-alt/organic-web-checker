@@ -607,6 +607,17 @@ GLOBAL_CSS = """
   .sc-box.sc-flags  .sc-num { color: var(--red);  text-shadow: 0 0 14px rgba(255,68,85,.4); }
   .sc-box.sc-fines  .sc-num { color: var(--neon); text-shadow: 0 0 16px rgba(0,255,127,.4); font-size: 1.15rem; }
 
+  /* ── Below-form session totals strip ────────────────────────────────── */
+  .form-stats {
+    display: flex; justify-content: center; gap: 28px;
+    margin-top: 10px; margin-bottom: 4px;
+    font-size: .73rem; color: var(--muted);
+    padding: 9px 14px;
+  }
+  .form-stat-item { display: flex; align-items: center; gap: 7px; }
+  .form-stat-num  { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); }
+  .form-stat-num.red { color: var(--red); }
+
   /* ── Progress panel ──────────────────────────────────────────────────── */
   .ps-header {
     font-size: .72rem; font-weight: 800; text-transform: uppercase;
@@ -1092,6 +1103,17 @@ MAIN_HTML = """<!DOCTYPE html>
     </form>
   </div>
 
+  <div class="form-stats" id="formStats">
+    <div class="form-stat-item">
+      <span>Total checks run:</span>
+      <span class="form-stat-num" id="fsChecks">0</span>
+    </div>
+    <div class="form-stat-item">
+      <span>Possible violations surfaced:</span>
+      <span class="form-stat-num red" id="fsFlags">0</span>
+    </div>
+  </div>
+
   <div class="queue-panel" id="queuePanel" style="display:none">
     <div class="queue-header">
       Checkers <span class="queue-count" id="queueCount">0</span>
@@ -1171,7 +1193,9 @@ MAIN_HTML = """<!DOCTYPE html>
       const s = await (await fetch('/stats')).json();
       document.getElementById('scChecks').textContent = s.checks_run.toLocaleString();
       document.getElementById('scFlags').textContent  = s.flags_found.toLocaleString();
-      document.getElementById('scFines').textContent = (s.flags_found + s.caution_found).toLocaleString();
+      document.getElementById('scFines').textContent  = (s.flags_found + s.caution_found).toLocaleString();
+      document.getElementById('fsChecks').textContent = s.checks_run.toLocaleString();
+      document.getElementById('fsFlags').textContent  = s.flags_found.toLocaleString();
     } catch(e) {}
   }
 
