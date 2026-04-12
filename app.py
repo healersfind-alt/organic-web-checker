@@ -24,9 +24,7 @@ stripe.api_key         = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PK              = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_WH_SECRET       = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 DATABASE_URL           = os.environ.get('DATABASE_URL', '')
-APP_BASE_URL           = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'organicwebcheck.up.railway.app')
-if not APP_BASE_URL.startswith('http'):
-    APP_BASE_URL = 'https://' + APP_BASE_URL
+APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebchecker.com')
 
 # ---------------------------------------------------------------------------
 # Postgres helpers
@@ -1380,7 +1378,7 @@ def pricing_page_html():
           <div class="pricing-per">Volume pricing</div>
           <div class="pricing-disc" style="color:var(--cyan)">50%+ off base rate</div>
           <div class="pricing-desc">For agencies and large certifiers running 500+ checks per year. Custom contract, volume discount, and priority support.</div>
-          <a href="mailto:hello@organicwebcheck.com" class="pricing-cta contact">Contact Us</a>
+          <a href="mailto:hello@organicwebchecker.com" class="pricing-cta contact">Contact Us</a>
         </div>"""
 
     return f"""
@@ -1499,7 +1497,7 @@ SETTINGS_BODY = """
 </div>
 <div class="settings-note">
   Settings are currently UI-only and reset on page reload. Full persistence launches with account sign-in.
-  Have a feature you&rsquo;d like to see? <a href="mailto:hello@organicwebcheck.com" style="color:var(--cyan);text-decoration:none">Email us</a>.
+  Have a feature you&rsquo;d like to see? <a href="mailto:hello@organicwebchecker.com" style="color:var(--cyan);text-decoration:none">Email us</a>.
 </div>
 """
 
@@ -1870,7 +1868,7 @@ def download_pdf(job_id):
 <table><tr><th>Status</th><th>Product / URL</th></tr>{site_rows()}</table>
 <h2>OID Certificate Products ({report.get('cert_product_count',0)} items)</h2>
 <table><tr><th>Certified Product</th></tr>{cert_rows()}</table>
-<div class="ts">Generated {now} by Organic Web Checker &mdash; organicwebcheck.up.railway.app</div>
+<div class="ts">Generated {now} by Organic Web Checker &mdash; www.organicwebchecker.com</div>
 <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),600));</script>
 </body>
 </html>"""
@@ -2013,7 +2011,7 @@ AGENTS_BODY = """
     <li>&#8680; <strong>OpenAPI spec</strong> &mdash; machine-readable API documentation</li>
   </ul>
   <div style="margin-top:18px">
-    <a href="mailto:hello@organicwebcheck.com" class="pricing-cta contact" style="display:inline-block;padding:10px 20px;font-size:.84rem">
+    <a href="mailto:hello@organicwebchecker.com" class="pricing-cta contact" style="display:inline-block;padding:10px 20px;font-size:.84rem">
       Request early API access
     </a>
   </div>
@@ -2050,8 +2048,8 @@ def agents():
 @app.route('/llms.txt')
 def llms_txt():
     content = """# Organic Web Checker
-# https://organicwebcheck.up.railway.app
-# Contact: hello@organicwebcheck.com
+# https://www.organicwebchecker.com
+# Contact: hello@organicwebchecker.com
 
 ## What this tool does
 Organic Web Checker compares a business's website organic product listings against their
