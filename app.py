@@ -2681,6 +2681,27 @@ def api_credits():
     return jsonify({'credits': 0, 'total_purchased': 0, 'has_account': False})
 
 
+@app.route('/api/init-db', methods=['POST'])
+def api_init_db():
+    """Admin-only: force run init_db and report result."""
+    if not is_admin(get_logged_in_email()):
+        return jsonify({'error': 'admin only'}), 403
+    try:
+        init_db()
+        # Check which tables exist
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name
+                """)
+                tables = [r[0] for r in cur.fetchall()]
+        return jsonify({'ok': True, 'tables': tables})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @app.route('/api/config-check')
 def config_check():
     """Admin-only diagnostic — shows whether env vars are loaded (not their values)."""
@@ -2732,9 +2753,11 @@ def register():
         credits = get_user_credits(email)
         return jsonify({'ok': True, 'email': email, 'credits': credits})
     except Exception as e:
-        if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
+        err = str(e)
+        if 'unique' in err.lower() or 'duplicate' in err.lower():
             return jsonify({'ok': False, 'error': 'An account with that email already exists.'}), 409
-        return jsonify({'ok': False, 'error': 'Registration failed. Please try again.'}), 500
+        print(f'[ERROR] register: {err}')
+        return jsonify({'ok': False, 'error': f'Registration failed: {err}'}), 500
 
 @app.route('/login', methods=['POST'])
 def login():
