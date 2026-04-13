@@ -304,6 +304,19 @@ def get_organic_products(website_url: str) -> list[dict]:
 # OID scraping via Playwright
 # ---------------------------------------------------------------------------
 
+def _clean_oid_search(name: str) -> str:
+    """Strip legal suffixes/punctuation before OID search field.
+    'Devenish Nutrition, LLC' → 'Devenish Nutrition'
+    'Smith & Sons, Inc.' → 'Smith & Sons'
+    """
+    cleaned = re.sub(
+        r',?\s*(LLC|L\.L\.C\.?|Inc\.?|Incorporated|Corp\.?|Corporation|'
+        r'Ltd\.?|Limited|Co\.?|LLP|LP|PLLC|PA|PC|DBA)\s*\.?\s*$',
+        '', name, flags=re.IGNORECASE
+    ).strip().rstrip(',').strip()
+    return cleaned or name
+
+
 def get_oid_cert(operation_name: str) -> dict:
     """
     Searches the USDA Organic Integrity Database for the operation.
@@ -323,7 +336,7 @@ def get_oid_cert(operation_name: str) -> dict:
         # Type into the operation name field
         op_input = page.locator("#operation")
         op_input.click()
-        page.keyboard.type(operation_name, delay=120)
+        page.keyboard.type(_clean_oid_search(operation_name), delay=120)
         time.sleep(2)
         page.keyboard.press("Tab")
         time.sleep(6)

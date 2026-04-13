@@ -9,9 +9,12 @@ import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from flask import Flask, request, render_template_string, send_from_directory, jsonify, Response, session
+from werkzeug.security import generate_password_hash, check_password_hash
 from checker import run_check
 import stripe
 import psycopg2
+
+ADMIN_EMAIL = 'healersfind@gmail.com'
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-in-prod')
@@ -67,6 +70,14 @@ def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    email         TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    credits       INTEGER NOT NULL DEFAULT 0,
+                    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
         conn.commit()
 
 try:
@@ -78,6 +89,52 @@ def get_session_token():
     if 'token' not in session:
         session['token'] = uuid.uuid4().hex
     return session['token']
+
+
+def get_logged_in_email():
+    return session.get('user_email')
+
+def is_admin(email):
+    return bool(email) and email.lower() == ADMIN_EMAIL.lower()
+
+def get_user_credits(email):
+    if is_admin(email):
+        return 99999
+    if not DATABASE_URL:
+        return 0
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT credits FROM users WHERE email = %s', (email.lower(),))
+                row = cur.fetchone()
+        return row[0] if row else 0
+    except Exception:
+        return 0
+
+def deduct_user_credit(email):
+    if is_admin(email) or not DATABASE_URL:
+        return
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'UPDATE users SET credits = GREATEST(0, credits - 1) WHERE email = %s',
+                    (email.lower(),)
+                )
+            conn.commit()
+    except Exception:
+        pass
+
+
+@app.context_processor
+def inject_user():
+    email = session.get('user_email')
+    return {
+        'user_email': email,
+        'user_is_admin': is_admin(email) if email else False,
+        'user_credits': get_user_credits(email) if email else 0,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Job queue (in-memory, single-server)
@@ -818,6 +875,89 @@ GLOBAL_CSS = """
     .header-nav { display: none; }
     .site-footer-inner { grid-template-columns: 1fr; gap: 28px; }
   }
+
+  /* ── Auth modal ──────────────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 9000;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  .modal-card {
+    background: var(--surface); border-radius: 18px; padding: 32px 28px;
+    width: 100%; max-width: 420px; position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,.18); border: 1px solid var(--border);
+  }
+  .modal-close {
+    position: absolute; top: 14px; right: 16px; background: none; border: none;
+    font-size: 1.4rem; color: var(--muted); cursor: pointer; line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-title { font-size: 1.1rem; font-weight: 800; color: var(--text); margin-bottom: 20px; }
+  .auth-tabs { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 20px; }
+  .auth-tab {
+    flex: 1; text-align: center; padding: 9px; font-size: .88rem; font-weight: 600;
+    color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent;
+    margin-bottom: -2px; transition: color .15s, border-color .15s;
+  }
+  .auth-tab.active { color: var(--primary); border-color: var(--primary); }
+  .auth-msg {
+    font-size: .82rem; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;
+  }
+  .auth-msg.error   { background: #FEF2F2; border: 1px solid #FCA5A5; color: var(--red); }
+  .auth-msg.success { background: #F0FDF4; border: 1px solid #86EFAC; color: #16A34A; }
+  .nav-user-email {
+    font-size: .82rem; font-weight: 600; color: var(--primary);
+    padding: 5px 10px; background: var(--lavender); border-radius: 8px;
+  }
+  .nav-signout {
+    font-size: .78rem; background: none; border: 1px solid var(--border);
+    border-radius: 7px; padding: 4px 10px; color: var(--muted); cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .nav-signout:hover { color: var(--red); border-color: var(--red); }
+
+  /* ── Payment gate / teaser ───────────────────────────────────────────── */
+  .gate-teaser {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 28px;
+  }
+  @media (max-width: 600px) { .gate-teaser { grid-template-columns: repeat(2, 1fr); } }
+  .gate-stat {
+    padding: 16px 10px; border-radius: 12px; text-align: center;
+    background: var(--lavender); border: 1px solid var(--border);
+  }
+  .gate-stat .g-num { font-size: 2rem; font-weight: 900; color: var(--text); line-height: 1; }
+  .gate-stat .g-lbl { font-size: .72rem; color: var(--muted); margin-top: 4px; }
+  .gate-stat.red-stat { background: #FEF2F2; border-color: #FCA5A5; }
+  .gate-stat.red-stat .g-num { color: var(--red); }
+  .gate-divider {
+    border: none; border-top: 1px solid var(--border); margin: 0 0 24px;
+  }
+  .gate-wrap { text-align: center; padding: 8px 0 28px; }
+  .gate-lock { font-size: 2.2rem; margin-bottom: 12px; }
+  .gate-title { font-size: 1.15rem; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+  .gate-sub {
+    font-size: .88rem; color: var(--muted); margin-bottom: 24px;
+    line-height: 1.6; max-width: 360px; margin-left: auto; margin-right: auto;
+  }
+  .gate-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .gate-btn-primary {
+    background: var(--primary); color: #fff; border: none; border-radius: 10px;
+    padding: 11px 24px; font-size: .9rem; font-weight: 700; cursor: pointer;
+    transition: background .15s;
+  }
+  .gate-btn-primary:hover { background: var(--primary-dark); }
+  .gate-btn-secondary {
+    background: none; color: var(--primary); border: 1.5px solid var(--primary);
+    border-radius: 10px; padding: 10px 22px; font-size: .9rem; font-weight: 600;
+    cursor: pointer; text-decoration: none; transition: background .15s;
+  }
+  .gate-btn-secondary:hover { background: var(--lavender); }
+  .gate-meta-block {
+    background: var(--lavender); border-radius: 12px; padding: 16px 20px;
+    margin-bottom: 24px; text-align: left; font-size: .84rem;
+  }
+  .gate-meta-block strong { color: var(--text); }
+  .gate-meta-block span   { color: var(--muted); }
 """
 
 
@@ -850,8 +990,16 @@ BASE_TEMPLATE = """<!DOCTYPE html>
       <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
       <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
       <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">API</a>
-      <a href="/account" class="nav-link {{ 'active' if active == 'account' else '' }}">Account</a>
     </nav>
+    <div id="navUserArea">
+      {% if user_email %}
+        <span class="nav-user-email">{{ user_email }}</span>
+        {% if user_is_admin %}<span style="font-size:.75rem;color:var(--muted)">Admin</span>{% else %}<span style="font-size:.75rem;color:var(--muted)">{{ user_credits }} credit{{ 's' if user_credits != 1 else '' }}</span>{% endif %}
+        <button class="nav-signout" onclick="doLogout()">Sign Out</button>
+      {% else %}
+        <a href="#" class="nav-link" onclick="openAuthModal('signin');return false;">Sign In</a>
+      {% endif %}
+    </div>
     <a href="/#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
@@ -879,6 +1027,84 @@ BASE_TEMPLATE = """<!DOCTYPE html>
 <script>
 function toggleDd(e){e.stopPropagation();document.getElementById('hDd').classList.toggle('open');}
 document.addEventListener('click',()=>{const d=document.getElementById('hDd');if(d)d.classList.remove('open');});
+</script>
+<!-- Auth Modal -->
+<div id="authModal" style="display:none" class="modal-overlay" onclick="if(event.target===this)closeAuthModal()">
+  <div class="modal-card">
+    <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="tabSignin"    onclick="switchAuthTab('signin')">Sign In</div>
+      <div class="auth-tab"        id="tabRegister"  onclick="switchAuthTab('register')">Create Account</div>
+    </div>
+    <div id="authMsg" style="display:none" class="auth-msg"></div>
+    <div id="authFormSignin">
+      <label>Email</label>
+      <input type="email" id="siEmail" placeholder="you@example.com" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <label>Password</label>
+      <input type="password" id="siPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doLogin()">
+      <button onclick="doLogin()" class="gate-btn-primary" style="width:100%">Sign In</button>
+    </div>
+    <div id="authFormRegister" style="display:none">
+      <label>Email</label>
+      <input type="email" id="rgEmail" placeholder="you@example.com" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <label>Password</label>
+      <input type="password" id="rgPw" placeholder="At least 8 characters" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <label>Confirm password</label>
+      <input type="password" id="rgPw2" placeholder="Repeat password" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doRegister()">
+      <button onclick="doRegister()" class="gate-btn-primary" style="width:100%">Create Account</button>
+    </div>
+  </div>
+</div>
+<script>
+let viewingJobId = window.viewingJobId || null;
+function openAuthModal(tab){switchAuthTab(tab||'signin');document.getElementById('authModal').style.display='flex';}
+function closeAuthModal(){document.getElementById('authModal').style.display='none';document.getElementById('authMsg').style.display='none';}
+function switchAuthTab(tab){
+  document.getElementById('tabSignin').classList.toggle('active', tab==='signin');
+  document.getElementById('tabRegister').classList.toggle('active', tab==='register');
+  document.getElementById('authFormSignin').style.display = tab==='signin' ? '' : 'none';
+  document.getElementById('authFormRegister').style.display = tab==='register' ? '' : 'none';
+}
+function showAuthMsg(msg,type){const el=document.getElementById('authMsg');el.textContent=msg;el.className='auth-msg '+type;el.style.display='';}
+async function doLogin(){
+  const email=document.getElementById('siEmail').value.trim();
+  const pw=document.getElementById('siPw').value;
+  if(!email||!pw){showAuthMsg('Email and password required.','error');return;}
+  try{
+    const res=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+    const data=await res.json();
+    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(window.viewingJobId)loadResult(window.viewingJobId);}
+    else showAuthMsg(data.error||'Sign-in failed.','error');
+  }catch(e){showAuthMsg('Network error — try again.','error');}
+}
+async function doRegister(){
+  const email=document.getElementById('rgEmail').value.trim();
+  const pw=document.getElementById('rgPw').value;
+  const pw2=document.getElementById('rgPw2').value;
+  if(!email||!pw){showAuthMsg('Email and password required.','error');return;}
+  if(pw!==pw2){showAuthMsg('Passwords do not match.','error');return;}
+  if(pw.length<8){showAuthMsg('Password must be at least 8 characters.','error');return;}
+  try{
+    const res=await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+    const data=await res.json();
+    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(window.viewingJobId)loadResult(window.viewingJobId);}
+    else showAuthMsg(data.error||'Registration failed.','error');
+  }catch(e){showAuthMsg('Network error — try again.','error');}
+}
+async function doLogout(){
+  await fetch('/logout',{method:'POST'});
+  location.reload();
+}
+function updateAuthUI(email,credits){
+  const el=document.getElementById('navUserArea');
+  if(!el)return;
+  if(email){
+    const credTxt=credits>=99999?'Admin':(credits+' credit'+(credits!==1?'s':''));
+    el.innerHTML='<span class="nav-user-email">'+email+'</span>&nbsp;<span style="font-size:.75rem;color:var(--muted)">'+credTxt+'</span>&nbsp;<button class="nav-signout" onclick="doLogout()">Sign Out</button>';
+  }else{
+    el.innerHTML='<a href="#" class="nav-link" onclick="openAuthModal(\'signin\');return false;">Sign In</a>';
+  }
+}
 </script>
 </body>
 </html>"""
@@ -1053,6 +1279,45 @@ REPORT_PARTIAL = """
   </ul>
 
 {% endif %}
+"""
+
+
+GATE_PARTIAL = """
+<div class="gate-meta-block">
+  <strong>{{ report.operation }}</strong><br>
+  <span>{{ report.certifier }} &middot; {{ report.status }} &middot; {{ report.location }}</span>
+</div>
+<div class="gate-teaser">
+  <div class="gate-stat {{ 'red-stat' if report.flagged|length > 0 else '' }}">
+    <div class="g-num">{{ report.flagged|length }}</div>
+    <div class="g-lbl">&#128308; Possible Issues</div>
+  </div>
+  <div class="gate-stat">
+    <div class="g-num">{{ report.caution|length }}</div>
+    <div class="g-lbl">&#128993; Caution</div>
+  </div>
+  <div class="gate-stat">
+    <div class="g-num">{{ report.marketing|length }}</div>
+    <div class="g-lbl">&#128992; Marketing Review</div>
+  </div>
+  <div class="gate-stat">
+    <div class="g-num">{{ report.verified|length }}</div>
+    <div class="g-lbl">&#10003; Confirmed OK</div>
+  </div>
+</div>
+<hr class="gate-divider">
+<div class="gate-wrap">
+  <div class="gate-lock">&#128274;</div>
+  <div class="gate-title">Unlock the Full Report</div>
+  <div class="gate-sub">
+    See exactly which products may need review, with direct links to each product page.
+    One checker credit unlocks this report permanently.
+  </div>
+  <div class="gate-actions">
+    <button class="gate-btn-primary" onclick="openAuthModal('signin')">Sign In to Unlock</button>
+    <a href="/pricing" class="gate-btn-secondary">Buy Checker Credits</a>
+  </div>
+</div>
 """
 
 
@@ -1320,8 +1585,16 @@ MAIN_HTML = """<!DOCTYPE html>
       <a href="/pricing" class="nav-link">Pricing</a>
       <a href="/history" class="nav-link">History</a>
       <a href="/agents"  class="nav-link">API</a>
-      <a href="/account" class="nav-link">Account</a>
     </nav>
+    <div id="navUserArea">
+      {% if user_email %}
+        <span class="nav-user-email">{{ user_email }}</span>
+        {% if user_is_admin %}<span style="font-size:.75rem;color:var(--muted)">Admin</span>{% else %}<span style="font-size:.75rem;color:var(--muted)">{{ user_credits }} credit{{ 's' if user_credits != 1 else '' }}</span>{% endif %}
+        <button class="nav-signout" onclick="doLogout()">Sign Out</button>
+      {% else %}
+        <a href="#" class="nav-link" onclick="openAuthModal('signin');return false;">Sign In</a>
+      {% endif %}
+    </div>
     <a href="#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
@@ -1796,6 +2069,83 @@ MAIN_HTML = """<!DOCTYPE html>
   setInterval(refreshQueue, 5000);
   setInterval(refreshStats, 10000);
 </script>
+<!-- Auth Modal -->
+<div id="authModal" style="display:none" class="modal-overlay" onclick="if(event.target===this)closeAuthModal()">
+  <div class="modal-card">
+    <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="tabSignin"    onclick="switchAuthTab('signin')">Sign In</div>
+      <div class="auth-tab"        id="tabRegister"  onclick="switchAuthTab('register')">Create Account</div>
+    </div>
+    <div id="authMsg" style="display:none" class="auth-msg"></div>
+    <div id="authFormSignin">
+      <label>Email</label>
+      <input type="email" id="siEmail" placeholder="you@example.com" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <label>Password</label>
+      <input type="password" id="siPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doLogin()">
+      <button onclick="doLogin()" class="gate-btn-primary" style="width:100%">Sign In</button>
+    </div>
+    <div id="authFormRegister" style="display:none">
+      <label>Email</label>
+      <input type="email" id="rgEmail" placeholder="you@example.com" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <label>Password</label>
+      <input type="password" id="rgPw" placeholder="At least 8 characters" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <label>Confirm password</label>
+      <input type="password" id="rgPw2" placeholder="Repeat password" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doRegister()">
+      <button onclick="doRegister()" class="gate-btn-primary" style="width:100%">Create Account</button>
+    </div>
+  </div>
+</div>
+<script>
+function openAuthModal(tab){switchAuthTab(tab||'signin');document.getElementById('authModal').style.display='flex';}
+function closeAuthModal(){document.getElementById('authModal').style.display='none';document.getElementById('authMsg').style.display='none';}
+function switchAuthTab(tab){
+  document.getElementById('tabSignin').classList.toggle('active', tab==='signin');
+  document.getElementById('tabRegister').classList.toggle('active', tab==='register');
+  document.getElementById('authFormSignin').style.display = tab==='signin' ? '' : 'none';
+  document.getElementById('authFormRegister').style.display = tab==='register' ? '' : 'none';
+}
+function showAuthMsg(msg,type){const el=document.getElementById('authMsg');el.textContent=msg;el.className='auth-msg '+type;el.style.display='';}
+async function doLogin(){
+  const email=document.getElementById('siEmail').value.trim();
+  const pw=document.getElementById('siPw').value;
+  if(!email||!pw){showAuthMsg('Email and password required.','error');return;}
+  try{
+    const res=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+    const data=await res.json();
+    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(viewingJobId)loadResult(viewingJobId);}
+    else showAuthMsg(data.error||'Sign-in failed.','error');
+  }catch(e){showAuthMsg('Network error — try again.','error');}
+}
+async function doRegister(){
+  const email=document.getElementById('rgEmail').value.trim();
+  const pw=document.getElementById('rgPw').value;
+  const pw2=document.getElementById('rgPw2').value;
+  if(!email||!pw){showAuthMsg('Email and password required.','error');return;}
+  if(pw!==pw2){showAuthMsg('Passwords do not match.','error');return;}
+  if(pw.length<8){showAuthMsg('Password must be at least 8 characters.','error');return;}
+  try{
+    const res=await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+    const data=await res.json();
+    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(viewingJobId)loadResult(viewingJobId);}
+    else showAuthMsg(data.error||'Registration failed.','error');
+  }catch(e){showAuthMsg('Network error — try again.','error');}
+}
+async function doLogout(){
+  await fetch('/logout',{method:'POST'});
+  location.reload();
+}
+function updateAuthUI(email,credits){
+  const el=document.getElementById('navUserArea');
+  if(!el)return;
+  if(email){
+    const credTxt=credits>=99999?'Admin':(credits+' credit'+(credits!==1?'s':''));
+    el.innerHTML='<span class="nav-user-email">'+email+'</span>&nbsp;<span style="font-size:.75rem;color:var(--muted)">'+credTxt+'</span>&nbsp;<button class="nav-signout" onclick="doLogout()">Sign Out</button>';
+  }else{
+    el.innerHTML='<a href="#" class="nav-link" onclick="openAuthModal(\'signin\');return false;">Sign In</a>';
+  }
+}
+</script>
 </body>
 </html>"""
 
@@ -1890,26 +2240,95 @@ def pricing_page_html():
 
 ACCOUNT_BODY = """
 <div class="account-wrap">
-  <div class="page-title">Account <span class="coming-soon-badge">Coming Soon</span></div>
-  <div class="page-subtitle">Sign in to access your check history, saved reports, and purchased checker credits.</div>
-  <div class="card">
-    <form onsubmit="return false">
-      <label for="email">Email</label>
-      <input type="email" id="email" placeholder="you@example.com">
-      <label for="pw">Password</label>
-      <input type="password" id="pw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;">
-      <button type="submit" style="width:100%;margin-top:4px" onclick="alert('Account sign-in is coming soon. Your check history is currently session-based.')">Sign In</button>
-    </form>
-    <div class="divider">or</div>
-    <div style="text-align:center;font-size:.82rem;color:var(--muted)">
-      Don&rsquo;t have an account? &nbsp;
-      <a href="#" style="color:var(--neon);text-decoration:none" onclick="alert('Registration coming soon.')">Create one &rarr;</a>
+  <div id="acctLoggedOut">
+    <div class="page-title">Account</div>
+    <div class="page-subtitle">Sign in to access your check history, saved reports, and purchased checker credits.</div>
+    <div class="card" style="max-width:420px;margin:0 auto">
+      <div class="auth-tabs">
+        <div class="auth-tab active" id="acctTabSignin"   onclick="acctSwitchTab('signin')">Sign In</div>
+        <div class="auth-tab"        id="acctTabRegister" onclick="acctSwitchTab('register')">Create Account</div>
+      </div>
+      <div id="acctMsg" style="display:none" class="auth-msg"></div>
+      <div id="acctFormSignin">
+        <label>Email</label>
+        <input type="email" id="acctSiEmail" placeholder="you@example.com">
+        <label style="margin-top:10px">Password</label>
+        <input type="password" id="acctSiPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onkeydown="if(event.key==='Enter')acctDoLogin()">
+        <button onclick="acctDoLogin()" style="width:100%;margin-top:14px">Sign In</button>
+      </div>
+      <div id="acctFormRegister" style="display:none">
+        <label>Email</label>
+        <input type="email" id="acctRgEmail" placeholder="you@example.com">
+        <label style="margin-top:10px">Password</label>
+        <input type="password" id="acctRgPw" placeholder="At least 8 characters">
+        <label style="margin-top:10px">Confirm password</label>
+        <input type="password" id="acctRgPw2" placeholder="Repeat password" onkeydown="if(event.key==='Enter')acctDoRegister()">
+        <button onclick="acctDoRegister()" style="width:100%;margin-top:14px">Create Account</button>
+      </div>
     </div>
   </div>
-  <div style="text-align:center;font-size:.78rem;color:var(--muted);margin-top:12px">
-    Until accounts are live, all check history is stored in your browser session only.
+  <div id="acctLoggedIn" style="display:none">
+    <div class="page-title">Account</div>
+    <div class="card" style="max-width:480px;margin:0 auto">
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">Signed in as</div>
+      <div id="acctEmail" style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:18px"></div>
+      <div style="display:flex;gap:12px;align-items:center;padding:16px;background:var(--lavender);border-radius:12px;margin-bottom:20px">
+        <div>
+          <div style="font-size:.75rem;color:var(--muted)">Checker credits</div>
+          <div id="acctCredits" style="font-size:1.5rem;font-weight:900;color:var(--primary)">—</div>
+        </div>
+        <a href="/pricing" style="margin-left:auto;font-size:.85rem;font-weight:600;color:var(--primary);text-decoration:none;background:#fff;padding:8px 16px;border-radius:8px;border:1px solid var(--border)">Buy more &rarr;</a>
+      </div>
+      <button onclick="acctDoLogout()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:8px 16px;color:var(--muted);font-size:.84rem;cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">Sign Out</button>
+    </div>
   </div>
 </div>
+<script>
+async function acctInit(){
+  const res=await fetch('/api/user');
+  const d=await res.json();
+  if(d.logged_in){
+    document.getElementById('acctLoggedOut').style.display='none';
+    document.getElementById('acctLoggedIn').style.display='';
+    document.getElementById('acctEmail').textContent=d.email;
+    document.getElementById('acctCredits').textContent=d.is_admin?'Unlimited (Admin)':(d.credits+' credit'+(d.credits!==1?'s':''));
+  }
+}
+acctInit();
+function acctSwitchTab(tab){
+  document.getElementById('acctTabSignin').classList.toggle('active',tab==='signin');
+  document.getElementById('acctTabRegister').classList.toggle('active',tab==='register');
+  document.getElementById('acctFormSignin').style.display=tab==='signin'?'':'none';
+  document.getElementById('acctFormRegister').style.display=tab==='register'?'':'none';
+  document.getElementById('acctMsg').style.display='none';
+}
+function showAcctMsg(msg,type){const el=document.getElementById('acctMsg');el.textContent=msg;el.className='auth-msg '+type;el.style.display='';}
+async function acctDoLogin(){
+  const email=document.getElementById('acctSiEmail').value.trim();
+  const pw=document.getElementById('acctSiPw').value;
+  if(!email||!pw){showAcctMsg('Email and password required.','error');return;}
+  const res=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+  const data=await res.json();
+  if(data.ok){location.reload();}
+  else showAcctMsg(data.error||'Sign-in failed.','error');
+}
+async function acctDoRegister(){
+  const email=document.getElementById('acctRgEmail').value.trim();
+  const pw=document.getElementById('acctRgPw').value;
+  const pw2=document.getElementById('acctRgPw2').value;
+  if(!email||!pw){showAcctMsg('Email and password required.','error');return;}
+  if(pw!==pw2){showAcctMsg('Passwords do not match.','error');return;}
+  if(pw.length<8){showAcctMsg('Password must be at least 8 characters.','error');return;}
+  const res=await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+  const data=await res.json();
+  if(data.ok){location.reload();}
+  else showAcctMsg(data.error||'Registration failed.','error');
+}
+async function acctDoLogout(){
+  await fetch('/logout',{method:'POST'});
+  location.reload();
+}
+</script>
 """
 
 
@@ -2070,6 +2489,7 @@ def check():
             'status': 'queued', 'report': None,
             'submitted_at': datetime.now(timezone.utc).isoformat(),
             'finished_at': None,
+            'unlocked': False,
         }
 
     thread = threading.Thread(target=_run_job, args=(job_id, operation, website), daemon=True)
@@ -2095,7 +2515,51 @@ def job_result(job_id):
         return 'Not found', 404
     if job['status'] not in ('done', 'error'):
         return 'Not ready', 202
-    return render_template_string(REPORT_PARTIAL, report=job.get('report', {}), job_id=job_id)
+    report = job.get('report', {})
+    if 'error' in report:
+        return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
+
+    # ── Gate check ──────────────────────────────────────────────────────────
+    email = get_logged_in_email()
+    already_unlocked = job.get('unlocked', False)
+
+    if already_unlocked or is_admin(email):
+        return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
+
+    if email and get_user_credits(email) > 0:
+        deduct_user_credit(email)
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['unlocked'] = True
+        return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
+
+    # Check session-token credits (anonymous purchasers)
+    token = session.get('token')
+    if token and DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'SELECT credits_remaining FROM credit_accounts WHERE token = %s',
+                        (token,)
+                    )
+                    row = cur.fetchone()
+                    if row and row[0] > 0:
+                        cur.execute(
+                            'UPDATE credit_accounts SET credits_remaining = GREATEST(0, credits_remaining - 1) WHERE token = %s',
+                            (token,)
+                        )
+                conn.commit()
+            if row and row[0] > 0:
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['unlocked'] = True
+                return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
+        except Exception:
+            pass
+
+    # No access — show teaser
+    return render_template_string(GATE_PARTIAL, report=report, job_id=job_id)
 
 
 @app.route('/jobs')
@@ -2125,7 +2589,7 @@ def create_checkout_session():
         if tier_index < 0 or tier_index >= len(TIERS):
             return jsonify({'error': 'Invalid tier'}), 400
         tier  = TIERS[tier_index]
-        token = get_session_token()
+        token = get_logged_in_email() or get_session_token()
         checkout = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -2161,28 +2625,37 @@ def stripe_webhook():
 
     if event['type'] == 'checkout.session.completed':
         obj               = event['data']['object']
-        token             = obj.get('client_reference_id', '')
+        ref               = obj.get('client_reference_id', '')
         credits           = int(obj.get('metadata', {}).get('credits', 0))
         tier_name         = obj.get('metadata', {}).get('tier_name', '')
         stripe_session_id = obj['id']
         amount_cents      = obj.get('amount_total', 0)
-        if token and credits > 0 and DATABASE_URL:
+        if ref and credits > 0 and DATABASE_URL:
             try:
                 with db_conn() as conn:
                     with conn.cursor() as cur:
+                        if '@' in ref:
+                            # logged-in user purchase → add to users table
+                            cur.execute("""
+                                INSERT INTO users (email, password_hash, credits)
+                                VALUES (%s, '', %s)
+                                ON CONFLICT (email) DO UPDATE SET
+                                    credits = users.credits + EXCLUDED.credits
+                            """, (ref.lower(), credits))
+                        else:
+                            # anonymous session token purchase
+                            cur.execute("""
+                                INSERT INTO credit_accounts (token, credits_remaining, total_purchased)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (token) DO UPDATE SET
+                                    credits_remaining = credit_accounts.credits_remaining + EXCLUDED.credits_remaining,
+                                    total_purchased   = credit_accounts.total_purchased   + EXCLUDED.total_purchased
+                            """, (ref, credits, credits))
                         cur.execute("""
-                            INSERT INTO credit_accounts (token, credits_remaining, total_purchased)
-                            VALUES (%s, %s, %s)
-                            ON CONFLICT (token) DO UPDATE SET
-                                credits_remaining = credit_accounts.credits_remaining + EXCLUDED.credits_remaining,
-                                total_purchased   = credit_accounts.total_purchased   + EXCLUDED.total_purchased
-                        """, (token, credits, credits))
-                        cur.execute("""
-                            INSERT INTO purchases
-                                (token, stripe_session_id, tier_name, credits_purchased, amount_paid_cents)
+                            INSERT INTO purchases (token, stripe_session_id, tier_name, credits_purchased, amount_paid_cents)
                             VALUES (%s, %s, %s, %s, %s)
                             ON CONFLICT (stripe_session_id) DO NOTHING
-                        """, (token, stripe_session_id, tier_name, credits, amount_cents))
+                        """, (ref, stripe_session_id, tier_name, credits, amount_cents))
                     conn.commit()
             except Exception as e:
                 print(f'[WARN] Webhook DB write failed: {e}')
@@ -2207,6 +2680,78 @@ def api_credits():
     except Exception:
         pass
     return jsonify({'credits': 0, 'total_purchased': 0, 'has_account': False})
+
+
+@app.route('/api/user')
+def api_user():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'logged_in': False})
+    credits = get_user_credits(email)
+    return jsonify({
+        'logged_in': True,
+        'email': email,
+        'is_admin': is_admin(email),
+        'credits': credits,
+    })
+
+@app.route('/register', methods=['POST'])
+def register():
+    data     = request.get_json(force=True) or {}
+    email    = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    if not email or '@' not in email:
+        return jsonify({'ok': False, 'error': 'Valid email required.'}), 400
+    if len(password) < 8:
+        return jsonify({'ok': False, 'error': 'Password must be at least 8 characters.'}), 400
+    if not DATABASE_URL:
+        return jsonify({'ok': False, 'error': 'Account system unavailable.'}), 503
+    try:
+        pw_hash = generate_password_hash(password)
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'INSERT INTO users (email, password_hash) VALUES (%s, %s)',
+                    (email, pw_hash)
+                )
+            conn.commit()
+        session['user_email'] = email
+        credits = get_user_credits(email)
+        return jsonify({'ok': True, 'email': email, 'credits': credits})
+    except Exception as e:
+        if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
+            return jsonify({'ok': False, 'error': 'An account with that email already exists.'}), 409
+        return jsonify({'ok': False, 'error': 'Registration failed. Please try again.'}), 500
+
+@app.route('/login', methods=['POST'])
+def login():
+    data     = request.get_json(force=True) or {}
+    email    = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    if not email or not password:
+        return jsonify({'ok': False, 'error': 'Email and password required.'}), 400
+    if not DATABASE_URL:
+        return jsonify({'ok': False, 'error': 'Account system unavailable.'}), 503
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT password_hash FROM users WHERE email = %s',
+                    (email,)
+                )
+                row = cur.fetchone()
+        if not row or not check_password_hash(row[0], password):
+            return jsonify({'ok': False, 'error': 'Invalid email or password.'}), 401
+        session['user_email'] = email
+        credits = get_user_credits(email)
+        return jsonify({'ok': True, 'email': email, 'credits': credits})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'Sign-in failed. Please try again.'}), 500
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.pop('user_email', None)
+    return jsonify({'ok': True})
 
 
 @app.route('/success')
