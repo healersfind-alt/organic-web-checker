@@ -26,7 +26,11 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-in-prod')
 stripe.api_key         = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PK              = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_WH_SECRET       = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
-DATABASE_URL           = os.environ.get('DATABASE_URL', '')
+_db_url     = os.environ.get('DATABASE_URL', '')
+_db_pub_url = os.environ.get('DATABASE_PUBLIC_URL', '')
+# Railway internal hostname only works with private networking enabled.
+# Fall back to public proxy URL automatically.
+DATABASE_URL = _db_pub_url if ('.railway.internal' in _db_url and _db_pub_url) else _db_url
 APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebchecker.com')
 
 # ---------------------------------------------------------------------------
