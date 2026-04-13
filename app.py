@@ -971,7 +971,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ page_title }} — Organic Web Checker</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
+  <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -980,7 +980,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
 <body>
 <header>
   <a href="/" class="header-logo">
-    <img src="/static/favicon.svg" class="header-logo-icon" alt="Organic Web Checker">
+    <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
     <span class="header-wordmark">Organic Web Checker</span>
   </a>
   <div class="header-right">
@@ -1003,7 +1003,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
     <a href="/#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
-        <img src="/static/favicon.svg" class="header-icon" alt="">
+        <img src="/static/icon.png" class="header-icon" alt="">
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
@@ -1334,7 +1334,7 @@ MAIN_HTML = """<!DOCTYPE html>
   <meta name="description" content="Compare your website's organic product claims against your live USDA Organic Integrity Database certificate. Surface items for review before they become issues.">
   <meta property="og:title" content="Organic Web Checker — Organic Compliance Review Tool">
   <meta property="og:description" content="AI-assisted review comparing organic website claims against live OID certificate data.">
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
+  <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -1575,7 +1575,7 @@ MAIN_HTML = """<!DOCTYPE html>
 
 <header>
   <a href="/" class="header-logo">
-    <img src="/static/favicon.svg" class="header-logo-icon" alt="Organic Web Checker">
+    <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
     <span class="header-wordmark">Organic Web Checker</span>
   </a>
   <div class="header-right">
@@ -1598,7 +1598,7 @@ MAIN_HTML = """<!DOCTYPE html>
     <a href="#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
-        <img src="/static/favicon.svg" class="header-icon" alt="">
+        <img src="/static/icon.png" class="header-icon" alt="">
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
@@ -2171,7 +2171,7 @@ def pricing_page_html():
         cards += f"""
         <div class="pricing-card{feat}">
           <div class="pricing-icon-row">
-            <img src="/static/favicon.svg" class="pricing-icon" alt="">
+            <img src="/static/icon.png" class="pricing-icon" alt="">
             <div class="pricing-mult">&times;{t['count']}</div>
           </div>
           <div class="pricing-tier-name">{t['name']}</div>
@@ -2185,7 +2185,7 @@ def pricing_page_html():
     custom = """
         <div class="pricing-card">
           <div class="pricing-icon-row">
-            <img src="/static/favicon.svg" class="pricing-icon" alt="">
+            <img src="/static/icon.png" class="pricing-icon" alt="">
             <div class="pricing-mult" style="color:var(--cyan);text-shadow:0 0 14px rgba(0,229,204,.4)">&infin;</div>
           </div>
           <div class="pricing-tier-name">Enterprise / Agency</div>
@@ -2198,7 +2198,7 @@ def pricing_page_html():
 
     return f"""
     <div class="pricing-intro">
-      <img src="/static/favicon.svg" class="pricing-big-icon" alt="Organic Web Checker">
+      <img src="/static/icon.png" class="pricing-big-icon" alt="Organic Web Checker">
       <div class="pricing-intro-text">
         <h2>Checkers are organic web checks</h2>
         <p>Each checker runs a live comparison of a client&rsquo;s website against their current USDA Organic Integrity Database certificate &mdash; flagging products marketed as organic that aren&rsquo;t on the cert. Credits never expire.</p>
@@ -2769,7 +2769,7 @@ def success():
             pass
     body = f"""
 <div style="text-align:center;padding:60px 20px">
-  <img src="/static/favicon.svg" style="width:72px;height:72px;margin-bottom:24px">
+  <img src="/static/icon.png" style="width:72px;height:72px;margin-bottom:24px">
   <div style="font-size:1.7rem;font-weight:900;color:var(--neon);margin-bottom:10px">Payment confirmed</div>
   <div style="color:var(--text);font-size:1.05rem;margin-bottom:6px">
     {f'<strong>{credits} checker{"s" if credits != 1 else ""}</strong> ({tier_name}) added to your account.' if credits else 'Your purchase was successful.'}
