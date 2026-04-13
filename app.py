@@ -1362,7 +1362,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <div class="hero-mock-card">
         <div class="hero-card-header">
           <span class="hero-card-dot"></span>
-          Compliance Review &mdash; Green Valley Organics
+          Compliance Review &mdash; Sunnycrest Naturals LLC
         </div>
         <div class="mock-row">
           <span class="mock-row-label">Certificate Status</span>
@@ -1381,8 +1381,8 @@ MAIN_HTML = """<!DOCTYPE html>
           <span class="chip chip-green">18 matched</span>
         </div>
         <div class="mock-divider">Items surfaced for review</div>
-        <div class="mock-flag-item">&#9888; Organic Valley Flax Oil</div>
-        <div class="mock-ok-item">&#10003; Organic Meadow Blend &mdash; on certificate</div>
+        <div class="mock-flag-item">&#9888; Organic Sunflower Seed Butter</div>
+        <div class="mock-ok-item">&#10003; Organic Oat Flour &mdash; on certificate</div>
         <div class="hero-card-footer">AI-assisted review &bull; Human judgment required for compliance decisions</div>
       </div>
     </div>
@@ -1483,8 +1483,8 @@ MAIN_HTML = """<!DOCTYPE html>
     <div class="sample-report">
       <div class="sample-report-header">
         <div>
-          <div class="sample-op-name">Green Valley Organics LLC</div>
-          <div class="sample-op-meta">MOSA Organic &bull; Certified &bull; Portland, OR &bull; greenvalleyorganics.com</div>
+          <div class="sample-op-name">Sunnycrest Naturals LLC</div>
+          <div class="sample-op-meta">Example Certifier &bull; Certified &bull; Example State &bull; sunnycrestnaturals.com</div>
         </div>
         <span class="chip chip-amber">2 items for review</span>
       </div>
@@ -1495,12 +1495,12 @@ MAIN_HTML = """<!DOCTYPE html>
       </div>
       <div class="sample-items">
         <div class="sample-section-head">&#128308; Items for review &mdash; not found on certificate</div>
-        <div class="sample-flag-item">&#9888; Organic Valley Flax Oil &mdash; 16oz</div>
-        <div class="sample-flag-item">&#9888; Organic Meadow Blend Supplement</div>
+        <div class="sample-flag-item">&#9888; Organic Sunflower Seed Butter &mdash; 12oz</div>
+        <div class="sample-flag-item">&#9888; Organic Elderberry Syrup</div>
         <div style="margin-top:14px">
           <div class="sample-section-head">&#10003; Confirmed on certificate</div>
-          <div class="sample-ok-item">&#10003; Organic Cold-Pressed Coconut Oil</div>
-          <div class="sample-ok-item">&#10003; Organic Raw Honey &mdash; Wildflower</div>
+          <div class="sample-ok-item">&#10003; Organic Oat Flour &mdash; Stone Ground</div>
+          <div class="sample-ok-item">&#10003; Organic Hemp Seed Oil</div>
         </div>
       </div>
       <div class="sample-report-footer">AI-assisted review &bull; Regulatory ref: 7 CFR Part 205 &bull; Human review required</div>
@@ -1590,7 +1590,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <form id="checkForm">
         <label for="operation">Operation Name (as listed in OID)</label>
         <input type="text" id="operation" name="operation"
-               placeholder="e.g. GREEN RIDGE ORGANICS LLC"
+               placeholder="e.g. SUNNYCREST NATURALS LLC"
                value="{{ prefill_op or '' }}" required>
         <label for="website">Website URL</label>
         <input type="text" id="website" name="website"
