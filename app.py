@@ -1056,7 +1056,6 @@ document.addEventListener('click',()=>{const d=document.getElementById('hDd');if
   </div>
 </div>
 <script>
-let viewingJobId = window.viewingJobId || null;
 function openAuthModal(tab){switchAuthTab(tab||'signin');document.getElementById('authModal').style.display='flex';}
 function closeAuthModal(){document.getElementById('authModal').style.display='none';document.getElementById('authMsg').style.display='none';}
 function switchAuthTab(tab){
