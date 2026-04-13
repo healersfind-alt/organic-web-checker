@@ -331,7 +331,14 @@ def get_oid_cert(operation_name: str) -> dict:
         body_text = page.inner_text("body")
         browser.close()
 
-    if operation_name.lower() not in body_text.lower():
+    def _oid_norm(s: str) -> str:
+        """Strip all non-alphanumeric chars for OID name comparison.
+        Handles comma/period variants: 'Devenish Nutrition, LLC' == 'DEVENISH NUTRITION LLC'.
+        """
+        return re.sub(r'[^a-z0-9]', '', s.lower())
+
+    op_norm = _oid_norm(operation_name)
+    if op_norm not in _oid_norm(body_text):
         return {"error": f"Operation '{operation_name}' not found in OID"}
 
     # Parse the result row
@@ -339,7 +346,7 @@ def get_oid_cert(operation_name: str) -> dict:
     result = {"operation": operation_name, "certifier": "", "status": "", "location": "", "products": []}
 
     for i, line in enumerate(lines):
-        if operation_name.upper() in line.upper():
+        if op_norm in _oid_norm(line):
             # Grab surrounding context
             block = "\n".join(lines[i:i+15])
 
