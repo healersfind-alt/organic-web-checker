@@ -2682,6 +2682,20 @@ def api_credits():
     return jsonify({'credits': 0, 'total_purchased': 0, 'has_account': False})
 
 
+@app.route('/api/config-check')
+def config_check():
+    """Admin-only diagnostic — shows whether env vars are loaded (not their values)."""
+    if not is_admin(get_logged_in_email()):
+        return jsonify({'error': 'admin only'}), 403
+    return jsonify({
+        'stripe_key_loaded':   bool(stripe.api_key and len(stripe.api_key) > 10),
+        'stripe_key_prefix':   stripe.api_key[:7] if stripe.api_key else '(empty)',
+        'stripe_wh_loaded':    bool(STRIPE_WH_SECRET),
+        'db_loaded':           bool(DATABASE_URL),
+        'app_base_url':        APP_BASE_URL,
+    })
+
+
 @app.route('/api/user')
 def api_user():
     email = get_logged_in_email()
