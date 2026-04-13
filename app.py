@@ -325,7 +325,7 @@ GLOBAL_CSS = """
   .header-logo {
     display: flex; align-items: center; gap: 10px; text-decoration: none;
   }
-  .header-logo-icon { width: 32px; height: 32px; flex-shrink: 0; }
+  .header-logo-icon { width: 48px; height: 48px; flex-shrink: 0; }
   .header-wordmark  { font-size: 1rem; font-weight: 800; color: var(--primary); }
   header h1 { font-size: 1rem; font-weight: 800; color: var(--primary); }
   header p  { font-size: .78rem; color: var(--muted); margin-top: 2px; }
@@ -357,7 +357,7 @@ GLOBAL_CSS = """
     transition: border-color .15s, box-shadow .15s;
   }
   .header-icon-btn:hover { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,61,246,.08); }
-  .header-icon { width: 32px; height: 32px; display: block; }
+  .header-icon { width: 48px; height: 48px; display: block; }
   .header-dropdown {
     position: absolute; top: calc(100% + 8px); right: 0;
     background: var(--surface); border: 1px solid var(--border);
@@ -589,7 +589,7 @@ GLOBAL_CSS = """
   }
   .pricing-intro-text h2 { font-size: 1.05rem; font-weight: 800; color: var(--primary); margin-bottom: 6px; }
   .pricing-intro-text p  { font-size: .84rem; color: var(--muted); line-height: 1.55; }
-  .pricing-big-icon { width: 64px; height: 64px; flex-shrink: 0; }
+  .pricing-big-icon { width: 110px; height: 110px; flex-shrink: 0; }
 
   .pricing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 14px; }
   .pricing-card {
@@ -609,7 +609,7 @@ GLOBAL_CSS = """
     box-shadow: 0 4px 24px rgba(91,61,246,.12);
   }
   .pricing-icon-row  { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .pricing-icon      { width: 32px; height: 32px; }
+  .pricing-icon      { width: 56px; height: 56px; }
   .pricing-mult      { font-size: 1.4rem; font-weight: 900; color: var(--primary); line-height: 1; }
   .pricing-tier-name { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; }
   .pricing-price     { font-size: 2rem; font-weight: 900; color: var(--text); line-height: 1; margin-bottom: 3px; }
@@ -2769,7 +2769,7 @@ def success():
             pass
     body = f"""
 <div style="text-align:center;padding:60px 20px">
-  <img src="/static/icon.png" style="width:72px;height:72px;margin-bottom:24px">
+  <img src="/static/icon.png" style="width:100px;height:100px;margin-bottom:24px">
   <div style="font-size:1.7rem;font-weight:900;color:var(--neon);margin-bottom:10px">Payment confirmed</div>
   <div style="color:var(--text);font-size:1.05rem;margin-bottom:6px">
     {f'<strong>{credits} checker{"s" if credits != 1 else ""}</strong> ({tier_name}) added to your account.' if credits else 'Your purchase was successful.'}
