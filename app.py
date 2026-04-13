@@ -223,193 +223,196 @@ def report_to_markdown(report: dict) -> str:
 # ---------------------------------------------------------------------------
 
 GLOBAL_CSS = """
+  /* ── Design tokens ───────────────────────────────────────────────────── */
   :root {
-    --bg:        #060e0a;
-    --surface:   #0c1e12;
-    --card-bg:   rgba(10, 28, 16, 0.92);
-    --border:    rgba(0, 255, 127, 0.10);
-    --glow:      rgba(0, 255, 127, 0.07);
-    --neon:      #00ff7f;
-    --neon-dim:  #00c860;
-    --neon-dark: #006830;
-    --cyan:      #00e5cc;
-    --amber:     #ffd060;
-    --red:       #ff4455;
-    --red-glow:  rgba(255, 68, 85, 0.12);
-    --text:      #cce8d0;
-    --muted:     #8ab89a;
-    --dim:       #2a4a32;
+    --bg:           #F8FAFC;
+    --surface:      #FFFFFF;
+    --card-bg:      #FFFFFF;
+    --border:       #E2E8F0;
+    --primary:      #5B3DF6;
+    --primary-dim:  #6366F1;
+    --primary-dark: #4F35D8;
+    --teal:         #14B8A6;
+    --green:        #22C55E;
+    --amber:        #D97706;
+    --red:          #DC2626;
+    --lavender:     #EEF2FF;
+    --text:         #0F172A;
+    --muted:        #64748B;
+    --dim:          #CBD5E1;
+    /* Legacy aliases kept for backward compat with existing templates */
+    --neon:         #22C55E;
+    --neon-dim:     #16A34A;
+    --neon-dark:    #15803D;
+    --cyan:         #14B8A6;
+    --glow:         rgba(91, 61, 246, 0.06);
+    --red-glow:     rgba(220, 38, 38, 0.08);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
   body {
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--bg); color: var(--text);
     min-height: 100vh;
-  }
-  body::before {
-    content: '';
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background-image:
-      linear-gradient(rgba(0,255,127,.018) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0,255,127,.018) 1px, transparent 1px);
-    background-size: 48px 48px;
   }
 
   /* ── Header ─────────────────────────────────────────────────────────── */
   header {
-    background: linear-gradient(135deg, #030a06 0%, #0a1f12 60%, #060e08 100%);
-    border-bottom: 1px solid rgba(0,255,127,.10);
-    box-shadow: 0 2px 60px rgba(0,255,127,.06);
-    padding: 18px 32px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 12px rgba(15,23,42,.06);
+    padding: 14px 32px;
     display: flex; align-items: center; justify-content: space-between; gap: 20px;
-    position: relative; z-index: 10;
+    position: sticky; top: 0; z-index: 100;
   }
-  header h1 {
-    font-size: 1.25rem; font-weight: 800; letter-spacing: .04em;
-    color: var(--neon);
-    text-shadow: 0 0 24px rgba(0,255,127,.55), 0 0 60px rgba(0,255,127,.18);
+  .header-logo {
+    display: flex; align-items: center; gap: 10px; text-decoration: none;
   }
-  header p { font-size: .8rem; color: var(--muted); margin-top: 3px; }
+  .header-logo-icon { width: 32px; height: 32px; flex-shrink: 0; }
+  .header-wordmark  { font-size: 1rem; font-weight: 800; color: var(--primary); }
+  header h1 { font-size: 1rem; font-weight: 800; color: var(--primary); }
+  header p  { font-size: .78rem; color: var(--muted); margin-top: 2px; }
 
   .header-right { display: flex; align-items: center; gap: 10px; }
-
-  .header-nav { display: flex; gap: 2px; }
+  .header-nav   { display: flex; gap: 2px; }
   .nav-link {
-    color: var(--muted); font-size: .78rem; text-decoration: none;
-    padding: 6px 11px; border-radius: 6px;
-    transition: color .18s, background .18s;
+    color: var(--muted); font-size: .82rem; text-decoration: none;
+    padding: 6px 12px; border-radius: 8px;
+    transition: color .15s, background .15s; font-weight: 500;
   }
-  .nav-link:hover, .nav-link.active { color: var(--neon); background: rgba(0,255,127,.06); }
+  .nav-link:hover { color: var(--primary); background: var(--lavender); }
+  .nav-link.active { color: var(--primary); background: var(--lavender); font-weight: 600; }
+
+  .header-cta-btn {
+    background: var(--primary); color: #fff;
+    border: none; border-radius: 8px;
+    padding: 8px 18px; font-size: .82rem; font-weight: 700;
+    cursor: pointer; text-decoration: none;
+    transition: background .15s, box-shadow .15s;
+    box-shadow: 0 2px 8px rgba(91,61,246,.25);
+  }
+  .header-cta-btn:hover { background: var(--primary-dark); box-shadow: 0 4px 16px rgba(91,61,246,.35); }
 
   .header-icon-wrap { position: relative; flex-shrink: 0; }
   .header-icon-btn {
-    background: none; border: 1px solid transparent; cursor: pointer;
+    background: none; border: 1px solid var(--border); cursor: pointer;
     padding: 5px; border-radius: 9px; display: block;
-    transition: border-color .2s, box-shadow .2s;
+    transition: border-color .15s, box-shadow .15s;
   }
-  .header-icon-btn:hover {
-    border-color: rgba(0,255,127,.28);
-    box-shadow: 0 0 14px rgba(0,255,127,.15);
-  }
-  .header-icon { width: 46px; height: 46px; display: block; }
+  .header-icon-btn:hover { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,61,246,.08); }
+  .header-icon { width: 32px; height: 32px; display: block; }
   .header-dropdown {
     position: absolute; top: calc(100% + 8px); right: 0;
-    background: #0c2018; border: 1px solid rgba(0,255,127,.14);
-    border-radius: 10px;
-    box-shadow: 0 8px 40px rgba(0,0,0,.55), 0 0 24px rgba(0,255,127,.07);
-    min-width: 190px; z-index: 100; display: none; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(15,23,42,.12);
+    min-width: 190px; z-index: 200; display: none; overflow: hidden;
   }
   .header-dropdown.open { display: block; }
   .dropdown-item {
     display: block; padding: 11px 17px;
     font-size: .84rem; color: var(--text);
-    text-decoration: none; border-bottom: 1px solid rgba(0,255,127,.06);
+    text-decoration: none; border-bottom: 1px solid var(--border);
   }
   .dropdown-item:last-child { border-bottom: none; }
-  .dropdown-item:hover { background: rgba(0,255,127,.07); color: var(--neon); }
+  .dropdown-item:hover { background: var(--lavender); color: var(--primary); }
 
   /* ── Layout ──────────────────────────────────────────────────────────── */
-  .page-main { max-width: 920px; margin: 36px auto; padding: 0 24px; position: relative; z-index: 1; }
+  .page-main { max-width: 920px; margin: 36px auto; padding: 0 24px; }
 
   /* ── Cards ───────────────────────────────────────────────────────────── */
   .card {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: 12px; padding: 26px 30px;
-    box-shadow: 0 0 40px var(--glow), inset 0 1px 0 rgba(0,255,127,.06);
+    border-radius: 16px; padding: 26px 30px;
+    box-shadow: 0 1px 16px rgba(15,23,42,.06);
     margin-bottom: 22px;
   }
 
   /* ── Page headers ────────────────────────────────────────────────────── */
-  .page-title {
-    font-size: 1.35rem; font-weight: 800; color: var(--neon);
-    text-shadow: 0 0 20px rgba(0,255,127,.35); margin-bottom: 6px;
-  }
-  .page-subtitle { font-size: .85rem; color: var(--muted); margin-bottom: 28px; }
+  .page-title    { font-size: 1.35rem; font-weight: 800; color: var(--primary); margin-bottom: 6px; }
+  .page-subtitle { font-size: .87rem; color: var(--muted); margin-bottom: 28px; line-height: 1.6; }
 
   /* ── Form ────────────────────────────────────────────────────────────── */
   label {
     display: block; font-size: .78rem; font-weight: 700; margin-bottom: 6px;
-    color: var(--muted); text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
   }
   input[type=text], input[type=email], input[type=password] {
     width: 100%; padding: 11px 14px;
-    background: rgba(0,0,0,.45); border: 1px solid rgba(0,255,127,.14);
-    border-radius: 8px; font-size: .94rem; margin-bottom: 16px; color: var(--text);
+    background: var(--bg); border: 1.5px solid var(--border);
+    border-radius: 10px; font-size: .94rem; margin-bottom: 16px; color: var(--text);
     transition: border-color .2s, box-shadow .2s;
   }
   input[type=text]::placeholder,
   input[type=email]::placeholder,
   input[type=password]::placeholder { color: var(--dim); }
   input:focus {
-    outline: none; border-color: rgba(0,255,127,.38);
-    box-shadow: 0 0 0 3px rgba(0,255,127,.07), 0 0 18px rgba(0,255,127,.09);
+    outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(91,61,246,.1);
   }
-  .hint { font-size: .76rem; color: var(--muted); margin-top: -10px; margin-bottom: 16px; }
+  .hint { font-size: .76rem; color: var(--muted); margin-top: -10px; margin-bottom: 16px; line-height: 1.5; }
 
   button[type=submit], .btn-primary {
-    background: var(--neon-dark); color: #c8ffd8;
-    border: 1px solid rgba(0,255,127,.28); border-radius: 8px;
-    padding: 11px 28px; font-size: .9rem;
-    cursor: pointer; font-weight: 800; letter-spacing: .04em;
-    transition: background .2s, box-shadow .2s, color .2s;
-    box-shadow: 0 0 20px rgba(0,255,127,.14);
+    background: var(--primary); color: #fff;
+    border: none; border-radius: 10px;
+    padding: 12px 28px; font-size: .9rem;
+    cursor: pointer; font-weight: 700;
+    transition: background .15s, box-shadow .15s;
+    box-shadow: 0 2px 12px rgba(91,61,246,.3);
   }
   button[type=submit]:hover, .btn-primary:hover {
-    background: var(--neon-dim); color: #030a06;
-    box-shadow: 0 0 30px rgba(0,255,127,.35);
+    background: var(--primary-dark);
+    box-shadow: 0 4px 20px rgba(91,61,246,.4);
   }
-  button[type=submit]:disabled { background: #0e2218; color: var(--dim); box-shadow: none; cursor: default; }
+  button[type=submit]:disabled { background: var(--dim); color: #fff; box-shadow: none; cursor: default; }
 
   /* ── Queue panel ─────────────────────────────────────────────────────── */
   .queue-panel {
     background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 12px; margin-bottom: 22px; overflow: hidden;
-    box-shadow: 0 0 40px var(--glow);
+    border-radius: 16px; margin-bottom: 22px; overflow: hidden;
+    box-shadow: 0 1px 16px rgba(15,23,42,.06);
   }
   .queue-header {
     padding: 12px 20px;
-    background: rgba(0,0,0,.3); border-bottom: 1px solid rgba(0,255,127,.07);
-    font-size: .72rem; font-weight: 800; text-transform: uppercase;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    font-size: .72rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: .09em; color: var(--muted);
     display: flex; align-items: center; gap: 8px;
   }
   .queue-count {
-    background: rgba(0,255,127,.12); color: var(--neon);
-    border: 1px solid rgba(0,255,127,.2); border-radius: 10px;
-    padding: 1px 8px; font-size: .7rem;
+    background: var(--lavender); color: var(--primary);
+    border: 1px solid rgba(91,61,246,.15); border-radius: 10px;
+    padding: 1px 8px; font-size: .7rem; font-weight: 700;
   }
   .queue-list { list-style: none; }
   .queue-item {
-    padding: 12px 20px; border-bottom: 1px solid rgba(0,255,127,.04);
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 12px; font-size: .875rem;
   }
   .queue-item:last-child { border-bottom: none; }
   .op-name { font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .site { font-size: .76rem; color: var(--muted); }
+  .site    { font-size: .76rem; color: var(--muted); }
 
   .status-pill {
-    font-size: .68rem; font-weight: 800; padding: 3px 9px;
+    font-size: .68rem; font-weight: 700; padding: 3px 9px;
     border-radius: 10px; white-space: nowrap; flex-shrink: 0; border: 1px solid;
   }
-  .status-queued  { background: rgba(255,255,255,.03); color: var(--muted); border-color: rgba(255,255,255,.08); }
-  .status-running { background: rgba(255,208,96,.08); color: var(--amber); border-color: rgba(255,208,96,.18); animation: pulse 1.4s ease-in-out infinite; }
-  .status-done    { background: rgba(0,255,127,.07); color: var(--neon); border-color: rgba(0,255,127,.18); }
-  .status-error   { background: rgba(255,68,85,.07); color: var(--red); border-color: rgba(255,68,85,.18); }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+  .status-queued  { background: #F1F5F9; color: var(--muted);  border-color: var(--border); }
+  .status-running { background: #FEF3C7; color: #D97706; border-color: #FDE68A; animation: pulse 1.4s ease-in-out infinite; }
+  .status-done    { background: #DCFCE7; color: #16A34A; border-color: #BBF7D0; }
+  .status-error   { background: #FEE2E2; color: #DC2626; border-color: #FECACA; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
 
   /* Animated checker loader */
   .checker-loader {
     position: relative; width: 40px; height: 40px; flex-shrink: 0;
-    border-radius: 4px; overflow: hidden;
-    background: repeating-conic-gradient(#001a0a 0% 25%, rgba(0,255,127,.1) 0% 50%) 0 0 / 8px 8px;
-    border: 1px solid rgba(0,255,127,.18);
-    box-shadow: 0 0 10px rgba(0,255,127,.15);
+    border-radius: 8px; overflow: hidden;
+    background: var(--lavender); border: 1px solid rgba(91,61,246,.15);
   }
   .cb-p {
     position: absolute; width: 6px; height: 6px; border-radius: 50%;
-    background: #ff4455; box-shadow: 0 0 7px rgba(255,68,85,.9);
+    background: var(--primary);
   }
   .cb-p.p1 { animation: cb1 2s ease-in-out infinite; }
   .cb-p.p2 { animation: cb2 2s ease-in-out infinite .67s; }
@@ -420,12 +423,12 @@ GLOBAL_CSS = """
 
   .view-btn {
     font-size: .73rem; padding: 4px 11px;
-    border: 1px solid rgba(0,255,127,.18); border-radius: 6px;
-    color: var(--neon); background: rgba(0,255,127,.05);
+    border: 1px solid rgba(91,61,246,.2); border-radius: 6px;
+    color: var(--primary); background: var(--lavender);
     cursor: pointer; flex-shrink: 0; text-decoration: none;
-    transition: background .18s, box-shadow .18s;
+    transition: background .15s; font-weight: 600;
   }
-  .view-btn:hover { background: rgba(0,255,127,.12); box-shadow: 0 0 10px rgba(0,255,127,.18); }
+  .view-btn:hover { background: rgba(91,61,246,.14); }
 
   .empty-queue { padding: 22px; text-align: center; color: var(--muted); font-size: .84rem; }
 
@@ -433,167 +436,149 @@ GLOBAL_CSS = """
   .report-header {
     display: flex; align-items: flex-start; justify-content: space-between;
     gap: 16px; margin-bottom: 22px;
-    padding-bottom: 14px; border-bottom: 1px solid rgba(0,255,127,.08);
+    padding-bottom: 14px; border-bottom: 1px solid var(--border);
   }
-  .report-op-name { font-size: 1rem; font-weight: 800; color: var(--neon); }
+  .report-op-name  { font-size: 1rem; font-weight: 800; color: var(--primary); }
   .report-meta-sub { font-size: .74rem; color: var(--muted); margin-top: 2px; }
   .download-btns { display: flex; gap: 7px; flex-shrink: 0; }
   .dl-btn {
-    font-size: .7rem; padding: 5px 12px; border-radius: 6px;
-    text-decoration: none; font-weight: 800; border: 1px solid;
-    transition: background .18s, box-shadow .18s; white-space: nowrap;
+    font-size: .7rem; padding: 5px 12px; border-radius: 8px;
+    text-decoration: none; font-weight: 700; border: 1px solid;
+    transition: background .15s; white-space: nowrap;
   }
-  .dl-btn.md  { color: var(--cyan); border-color: rgba(0,229,204,.22); background: rgba(0,229,204,.05); }
-  .dl-btn.md:hover  { background: rgba(0,229,204,.12); box-shadow: 0 0 10px rgba(0,229,204,.18); }
-  .dl-btn.pdf { color: var(--amber); border-color: rgba(255,208,96,.22); background: rgba(255,208,96,.05); }
-  .dl-btn.pdf:hover { background: rgba(255,208,96,.12); box-shadow: 0 0 10px rgba(255,208,96,.18); }
+  .dl-btn.md  { color: var(--teal);  border-color: rgba(20,184,166,.25); background: rgba(20,184,166,.06); }
+  .dl-btn.md:hover  { background: rgba(20,184,166,.14); }
+  .dl-btn.pdf { color: var(--amber); border-color: rgba(217,119,6,.25);  background: rgba(217,119,6,.06); }
+  .dl-btn.pdf:hover { background: rgba(217,119,6,.14); }
 
   .meta-grid {
     display: grid; grid-template-columns: 1fr 1fr;
     gap: 10px 28px; margin-bottom: 22px;
   }
   .meta-item label { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
-  .meta-item span { font-size: .9rem; font-weight: 600; color: var(--text); }
+  .meta-item span  { font-size: .9rem; font-weight: 600; color: var(--text); }
 
   .stats {
     display: grid; grid-template-columns: repeat(4,1fr);
     gap: 10px; margin-bottom: 26px;
   }
   .stat {
-    background: rgba(0,0,0,.35); border: 1px solid rgba(0,255,127,.07);
-    border-radius: 10px; padding: 14px; text-align: center;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px; text-align: center;
   }
   .stat .num { font-size: 1.9rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
   .stat .lbl { font-size: .66rem; color: var(--muted); margin-top: 5px; text-transform: uppercase; letter-spacing: .06em; }
-  .stat.flagged  { border-color: rgba(255,68,85,.18); background: rgba(255,68,85,.04); }
-  .stat.flagged  .num { color: var(--red); text-shadow: 0 0 20px rgba(255,68,85,.5); }
-  .stat.verified .num { color: var(--neon); text-shadow: 0 0 18px rgba(0,255,127,.4); }
+  .stat.flagged  { border-color: rgba(220,38,38,.15); background: #FEF2F2; }
+  .stat.flagged  .num { color: var(--red); }
+  .stat.verified .num { color: var(--green); }
 
   .section-label {
-    font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .1em;
+    font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
     margin-bottom: 10px; margin-top: 24px;
     display: flex; align-items: center; gap: 8px;
   }
   .section-label:first-of-type { margin-top: 0; }
-  .section-label.red   { color: var(--red); }
-  .section-label.green { color: var(--neon); }
-  .section-label.cyan  { color: var(--cyan); }
+  .section-label.red    { color: var(--red); }
+  .section-label.green  { color: #16A34A; }
+  .section-label.cyan   { color: var(--teal); }
+  .section-label.amber  { color: var(--amber); }
+  .section-label.orange { color: #EA580C; }
   .badge {
     font-size: .66rem; padding: 1px 7px; border-radius: 8px; font-weight: 700; border: 1px solid;
   }
-  .red    .badge { background: rgba(255,68,85,.08); border-color: rgba(255,68,85,.2); color: var(--red); }
-  .green  .badge { background: rgba(0,255,127,.07); border-color: rgba(0,255,127,.15); color: var(--neon); }
-  .cyan   .badge { background: rgba(0,229,204,.07); border-color: rgba(0,229,204,.15); color: var(--cyan); }
-  .amber  .badge { background: rgba(255,208,96,.07); border-color: rgba(255,208,96,.18); color: var(--amber); }
-  .orange .badge { background: rgba(255,140,0,.07); border-color: rgba(255,140,0,.18); color: #ff8c00; }
-  .section-label.amber  { color: var(--amber); }
-  .section-label.orange { color: #ff8c00; }
+  .red    .badge { background: #FEE2E2; border-color: #FECACA; color: var(--red); }
+  .green  .badge { background: #DCFCE7; border-color: #BBF7D0; color: #16A34A; }
+  .cyan   .badge { background: #CCFBF1; border-color: #99F6E4; color: var(--teal); }
+  .amber  .badge { background: #FEF3C7; border-color: #FDE68A; color: var(--amber); }
+  .orange .badge { background: #FFEDD5; border-color: #FED7AA; color: #EA580C; }
 
   .product-list { list-style: none; display: grid; gap: 4px; }
   .product-list li {
-    padding: 8px 13px; border-radius: 0 6px 6px 0;
+    padding: 8px 13px; border-radius: 0 8px 8px 0;
     font-size: .86rem; display: flex; align-items: center; gap: 9px;
   }
-  .product-list li.flag-item {
-    background: rgba(255,68,85,.05); border-left: 3px solid var(--red);
-    box-shadow: inset 0 0 14px rgba(255,68,85,.06);
-  }
-  .product-list li.ok-item {
-    background: rgba(0,255,127,.025); border-left: 3px solid rgba(0,255,127,.2);
-  }
-  .product-list li.cert-item {
-    background: rgba(0,229,204,.025); border-left: 3px solid rgba(0,229,204,.18);
-    color: var(--muted);
-  }
-  .product-list li.caution-item {
-    background: rgba(255,208,96,.04); border-left: 3px solid rgba(255,208,96,.3);
-    box-shadow: inset 0 0 12px rgba(255,208,96,.05);
-  }
-  .product-list li.marketing-item {
-    background: rgba(255,140,0,.04); border-left: 3px solid rgba(255,140,0,.28);
-  }
-  .caution-icon  { color: var(--amber); flex-shrink: 0; }
-  .marketing-icon { color: #ff8c00; flex-shrink: 0; }
-  .product-list a { color: var(--red); font-weight: 600; text-decoration: none; border-bottom: 1px solid rgba(255,68,85,.3); }
+  .product-list li.flag-item     { background: #FEF2F2; border-left: 3px solid #FCA5A5; }
+  .product-list li.ok-item       { background: #F0FDF4; border-left: 3px solid #86EFAC; }
+  .product-list li.cert-item     { background: #F0FDFA; border-left: 3px solid #5EEAD4; color: var(--muted); }
+  .product-list li.caution-item  { background: #FFFBEB; border-left: 3px solid #FCD34D; }
+  .product-list li.marketing-item{ background: #FFF7ED; border-left: 3px solid #FDBA74; }
+  .caution-icon   { color: var(--amber); flex-shrink: 0; }
+  .marketing-icon { color: #EA580C; flex-shrink: 0; }
+  .product-list a { color: var(--red); font-weight: 600; text-decoration: none; border-bottom: 1px solid rgba(220,38,38,.2); }
   .product-list a:hover { border-bottom-color: var(--red); }
   .product-list .no-link { color: var(--text); }
   .verify-btn {
     margin-left: auto; flex-shrink: 0; font-size: .7rem;
-    border: 1px solid rgba(255,68,85,.28); border-radius: 4px;
+    border: 1px solid #FECACA; border-radius: 4px;
     padding: 2px 7px; color: var(--red); text-decoration: none;
     background: none; white-space: nowrap;
   }
-  .verify-btn:hover { background: rgba(255,68,85,.08); }
+  .verify-btn:hover { background: #FEE2E2; }
 
   .scrollable-list { max-height: 340px; overflow-y: auto; padding-right: 4px; }
   .scrollable-list::-webkit-scrollbar { width: 4px; }
-  .scrollable-list::-webkit-scrollbar-track { background: rgba(0,255,127,.04); }
-  .scrollable-list::-webkit-scrollbar-thumb { background: rgba(0,255,127,.18); border-radius: 2px; }
+  .scrollable-list::-webkit-scrollbar-track { background: var(--bg); }
+  .scrollable-list::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
 
-  .clean { color: var(--neon); font-weight: 700; padding: 14px 0; text-shadow: 0 0 14px rgba(0,255,127,.35); }
-  .error-msg { background: rgba(255,68,85,.07); border-left: 3px solid var(--red); padding: 13px 17px; border-radius: 0 8px 8px 0; color: var(--red); }
+  .clean     { color: #16A34A; font-weight: 700; padding: 14px 0; }
+  .error-msg { background: #FEF2F2; border-left: 3px solid #FCA5A5; padding: 13px 17px; border-radius: 0 8px 8px 0; color: var(--red); }
 
   /* ── Pricing ─────────────────────────────────────────────────────────── */
   .pricing-intro {
     background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 12px; padding: 24px 28px; margin-bottom: 24px;
+    border-radius: 16px; padding: 24px 28px; margin-bottom: 24px;
     display: flex; align-items: center; gap: 20px;
-    box-shadow: 0 0 40px var(--glow);
+    box-shadow: 0 1px 16px rgba(15,23,42,.06);
   }
-  .pricing-intro-text h2 { font-size: 1.05rem; font-weight: 800; color: var(--neon); margin-bottom: 6px; }
+  .pricing-intro-text h2 { font-size: 1.05rem; font-weight: 800; color: var(--primary); margin-bottom: 6px; }
   .pricing-intro-text p  { font-size: .84rem; color: var(--muted); line-height: 1.55; }
-  .pricing-big-icon { width: 72px; height: 72px; flex-shrink: 0; filter: drop-shadow(0 0 10px rgba(0,255,127,.35)); }
+  .pricing-big-icon { width: 64px; height: 64px; flex-shrink: 0; }
 
-  .pricing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap: 14px; }
+  .pricing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 14px; }
   .pricing-card {
     background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 12px; padding: 22px;
+    border-radius: 16px; padding: 22px;
     display: flex; flex-direction: column;
-    transition: transform .18s, box-shadow .18s, border-color .18s;
-    box-shadow: 0 0 30px rgba(0,0,0,.3);
+    transition: transform .15s, box-shadow .15s, border-color .15s;
+    box-shadow: 0 1px 12px rgba(15,23,42,.06);
   }
   .pricing-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 8px 40px rgba(0,255,127,.09);
-    border-color: rgba(0,255,127,.22);
+    box-shadow: 0 8px 32px rgba(91,61,246,.1);
+    border-color: rgba(91,61,246,.2);
   }
   .pricing-card.featured {
-    border-color: rgba(0,255,127,.28);
-    box-shadow: 0 0 35px rgba(0,255,127,.09);
+    border-color: rgba(91,61,246,.3);
+    box-shadow: 0 4px 24px rgba(91,61,246,.12);
   }
-  .pricing-icon-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .pricing-icon { width: 34px; height: 34px; }
-  .pricing-mult {
-    font-size: 1.5rem; font-weight: 900; color: var(--neon);
-    text-shadow: 0 0 14px rgba(0,255,127,.4); line-height: 1;
-  }
-  .pricing-tier-name {
-    font-size: .72rem; font-weight: 800; text-transform: uppercase;
-    letter-spacing: .08em; color: var(--muted); margin-bottom: 6px;
-  }
-  .pricing-price { font-size: 2rem; font-weight: 900; color: var(--text); line-height: 1; margin-bottom: 3px; }
-  .pricing-per   { font-size: .76rem; color: var(--muted); margin-bottom: 4px; }
-  .pricing-disc  {
-    font-size: .7rem; font-weight: 800; color: var(--neon);
-    text-shadow: 0 0 8px rgba(0,255,127,.3); margin-bottom: 14px;
-  }
+  .pricing-icon-row  { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .pricing-icon      { width: 32px; height: 32px; }
+  .pricing-mult      { font-size: 1.4rem; font-weight: 900; color: var(--primary); line-height: 1; }
+  .pricing-tier-name { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; }
+  .pricing-price     { font-size: 2rem; font-weight: 900; color: var(--text); line-height: 1; margin-bottom: 3px; }
+  .pricing-per       { font-size: .76rem; color: var(--muted); margin-bottom: 4px; }
+  .pricing-disc      { font-size: .7rem; font-weight: 700; color: var(--green); margin-bottom: 14px; }
   .pricing-disc.none { color: var(--muted); }
-  .pricing-desc  { font-size: .81rem; color: var(--muted); line-height: 1.5; flex: 1; margin-bottom: 16px; }
+  .pricing-desc      { font-size: .81rem; color: var(--muted); line-height: 1.55; flex: 1; margin-bottom: 16px; }
   .pricing-cta {
     display: block; text-align: center;
-    background: rgba(0,255,127,.07); border: 1px solid rgba(0,255,127,.18);
-    border-radius: 8px; padding: 9px;
-    color: var(--neon); font-weight: 800; font-size: .84rem;
+    background: var(--primary); color: #fff;
+    border: none; border-radius: 10px; padding: 10px;
+    font-weight: 700; font-size: .84rem;
     text-decoration: none; cursor: pointer;
-    transition: background .18s, box-shadow .18s;
+    transition: background .15s, box-shadow .15s;
+    box-shadow: 0 2px 10px rgba(91,61,246,.25);
   }
-  .pricing-cta:hover { background: rgba(0,255,127,.14); box-shadow: 0 0 18px rgba(0,255,127,.18); }
-  .pricing-cta.contact { color: var(--cyan); border-color: rgba(0,229,204,.2); background: rgba(0,229,204,.05); }
-  .pricing-cta.contact:hover { background: rgba(0,229,204,.12); box-shadow: 0 0 18px rgba(0,229,204,.15); }
+  .pricing-cta:hover { background: var(--primary-dark); box-shadow: 0 4px 16px rgba(91,61,246,.35); }
+  .pricing-cta.contact {
+    background: var(--bg); color: var(--teal);
+    border: 1px solid rgba(20,184,166,.2); box-shadow: none;
+  }
+  .pricing-cta.contact:hover { background: #CCFBF1; }
   .coming-soon-note {
     text-align: center; margin-top: 28px;
-    background: rgba(255,208,96,.05); border: 1px dashed rgba(255,208,96,.2);
-    border-radius: 10px; padding: 16px 20px;
+    background: #FFFBEB; border: 1px dashed #FDE68A;
+    border-radius: 12px; padding: 16px 20px;
     font-size: .82rem; color: var(--muted); line-height: 1.55;
   }
   .coming-soon-note strong { color: var(--amber); }
@@ -602,62 +587,63 @@ GLOBAL_CSS = """
   .history-empty { text-align: center; color: var(--muted); padding: 40px; font-size: .88rem; }
   .history-item {
     background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 10px; padding: 15px 20px; margin-bottom: 10px;
+    border-radius: 12px; padding: 15px 20px; margin-bottom: 10px;
     display: flex; align-items: center; gap: 16px;
-    box-shadow: 0 0 20px rgba(0,0,0,.3);
-    transition: border-color .18s;
+    box-shadow: 0 1px 8px rgba(15,23,42,.05);
+    transition: border-color .15s;
   }
-  .history-item:hover { border-color: rgba(0,255,127,.2); }
+  .history-item:hover { border-color: rgba(91,61,246,.2); }
   .h-main { flex: 1; min-width: 0; }
   .h-op   { font-weight: 700; font-size: .9rem; color: var(--text); }
   .h-site { font-size: .74rem; color: var(--muted); margin-top: 1px; }
   .h-ts   { font-size: .7rem; color: var(--dim); margin-top: 2px; }
   .h-stats { display: flex; gap: 12px; }
-  .h-stat { font-size: .74rem; font-weight: 700; }
+  .h-stat  { font-size: .74rem; font-weight: 700; }
   .h-stat.flags { color: var(--red); }
-  .h-stat.vf    { color: var(--neon); }
+  .h-stat.vf    { color: var(--green); }
   .h-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
   /* ── Account ─────────────────────────────────────────────────────────── */
   .account-wrap { max-width: 420px; margin: 0 auto; }
   .coming-soon-badge {
-    display: inline-block; font-size: .68rem; font-weight: 800;
+    display: inline-block; font-size: .68rem; font-weight: 700;
     text-transform: uppercase; letter-spacing: .08em;
     padding: 2px 8px; border-radius: 8px;
-    background: rgba(255,208,96,.1); border: 1px solid rgba(255,208,96,.2); color: var(--amber);
+    background: #FEF3C7; border: 1px solid #FDE68A; color: var(--amber);
   }
   .divider {
     text-align: center; color: var(--muted); font-size: .76rem;
     margin: 14px 0; display: flex; align-items: center; gap: 12px;
   }
-  .divider::before, .divider::after { content:''; flex:1; height:1px; background: rgba(0,255,127,.07); }
+  .divider::before, .divider::after { content:''; flex:1; height:1px; background: var(--border); }
 
   /* ── Settings ────────────────────────────────────────────────────────── */
   .setting-row {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 0; border-bottom: 1px solid rgba(0,255,127,.05);
+    padding: 16px 0; border-bottom: 1px solid var(--border);
   }
   .setting-row:last-child { border-bottom: none; }
-  .setting-info { flex: 1; }
+  .setting-info  { flex: 1; }
   .setting-label { font-size: .88rem; font-weight: 700; color: var(--text); }
   .setting-desc  { font-size: .75rem; color: var(--muted); margin-top: 2px; }
   .toggle {
-    width: 40px; height: 22px; background: rgba(0,0,0,.5);
-    border: 1px solid rgba(0,255,127,.14); border-radius: 11px;
+    width: 40px; height: 22px; background: var(--dim);
+    border: none; border-radius: 11px;
     cursor: pointer; position: relative; flex-shrink: 0; margin-left: 16px;
-    transition: background .25s, border-color .25s;
+    transition: background .25s;
   }
-  .toggle.on { background: rgba(0,200,96,.22); border-color: rgba(0,255,127,.3); }
+  .toggle.on { background: var(--primary); }
   .toggle::after {
-    content:''; position: absolute; top: 2px; left: 2px;
+    content:''; position: absolute; top: 3px; left: 3px;
     width: 16px; height: 16px; border-radius: 50%;
-    background: var(--muted); transition: transform .25s, background .25s;
+    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    transition: transform .25s;
   }
-  .toggle.on::after { transform: translateX(18px); background: var(--neon); }
+  .toggle.on::after { transform: translateX(18px); }
   .settings-note {
     margin-top: 24px; padding: 14px 18px;
-    background: rgba(0,229,204,.04); border: 1px dashed rgba(0,229,204,.15);
-    border-radius: 8px; font-size: .8rem; color: var(--muted); line-height: 1.5;
+    background: var(--lavender); border: 1px dashed rgba(91,61,246,.2);
+    border-radius: 10px; font-size: .8rem; color: var(--muted); line-height: 1.5;
   }
 
   /* ── Session stats counter ──────────────────────────────────────────── */
@@ -666,21 +652,21 @@ GLOBAL_CSS = """
     gap: 10px; margin-bottom: 22px;
   }
   .sc-box {
-    background: rgba(0,0,0,.38); border: 1px solid rgba(0,255,127,.07);
-    border-radius: 10px; padding: 13px 14px; text-align: center;
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px; text-align: center;
+    box-shadow: 0 1px 8px rgba(15,23,42,.04);
   }
   .sc-num { font-size: 1.55rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
   .sc-lbl { font-size: .62rem; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .07em; }
   .sc-box.sc-checks .sc-num { color: var(--text); }
-  .sc-box.sc-flags  .sc-num { color: var(--red);  text-shadow: 0 0 14px rgba(255,68,85,.4); }
-  .sc-box.sc-fines  .sc-num { color: var(--neon); text-shadow: 0 0 16px rgba(0,255,127,.4); font-size: 1.15rem; }
+  .sc-box.sc-flags  .sc-num { color: var(--red); }
+  .sc-box.sc-fines  .sc-num { color: var(--green); }
 
   /* ── Below-form session totals strip ────────────────────────────────── */
   .form-stats {
     display: flex; justify-content: center; gap: 28px;
     margin-top: 10px; margin-bottom: 4px;
-    font-size: .73rem; color: var(--muted);
-    padding: 9px 14px;
+    font-size: .73rem; color: var(--muted); padding: 9px 14px;
   }
   .form-stat-item { display: flex; align-items: center; gap: 7px; }
   .form-stat-num  { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); }
@@ -688,7 +674,7 @@ GLOBAL_CSS = """
 
   /* ── Progress panel ──────────────────────────────────────────────────── */
   .ps-header {
-    font-size: .72rem; font-weight: 800; text-transform: uppercase;
+    font-size: .72rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: .09em; color: var(--muted); margin-bottom: 14px;
     display: flex; align-items: center; gap: 8px;
   }
@@ -697,7 +683,7 @@ GLOBAL_CSS = """
 
   .progress-step {
     display: flex; align-items: center; gap: 14px;
-    padding: 9px 0; border-bottom: 1px solid rgba(0,255,127,.05);
+    padding: 9px 0; border-bottom: 1px solid var(--border);
     transition: opacity .3s;
   }
   .progress-step:last-child { border-bottom: none; }
@@ -707,59 +693,41 @@ GLOBAL_CSS = """
     display: flex; align-items: center; justify-content: center;
     font-size: .72rem; font-weight: 800; transition: all .3s;
   }
-  .ps-pending .ps-num { background: rgba(255,255,255,.04); color: var(--dim); border: 1px solid rgba(255,255,255,.07); }
-  .ps-active  .ps-num { background: rgba(0,255,127,.1); color: var(--neon); border: 1px solid rgba(0,255,127,.3); box-shadow: 0 0 12px rgba(0,255,127,.25); animation: pulse 1.4s ease-in-out infinite; }
-  .ps-done    .ps-num { background: rgba(0,255,127,.14); color: var(--neon); border: 1px solid rgba(0,255,127,.22); }
+  .ps-pending .ps-num { background: var(--bg); color: var(--dim); border: 1px solid var(--border); }
+  .ps-active  .ps-num { background: var(--lavender); color: var(--primary); border: 1px solid rgba(91,61,246,.3); animation: pulse 1.4s ease-in-out infinite; }
+  .ps-done    .ps-num { background: #DCFCE7; color: #16A34A; border: 1px solid #86EFAC; }
 
   .ps-info  { flex: 1; }
   .ps-name  { font-size: .83rem; font-weight: 600; transition: color .3s; }
   .ps-msg   { font-size: .72rem; color: var(--muted); margin-top: 2px; min-height: 14px; }
-  .ps-pending .ps-name { color: var(--dim); }
-  .ps-active  .ps-name { color: var(--neon); }
+  .ps-pending .ps-name { color: var(--muted); }
+  .ps-active  .ps-name { color: var(--primary); }
   .ps-done    .ps-name { color: var(--muted); }
 
-  .ps-bar { width: 90px; height: 3px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .ps-bar  { width: 90px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
   .ps-fill { height: 100%; border-radius: 2px; transition: width .6s ease, background .4s; }
   .ps-pending .ps-fill { width: 0; background: transparent; }
   .ps-active  .ps-fill {
     width: 65%;
-    background: linear-gradient(90deg, var(--neon-dark) 0%, var(--neon) 50%, var(--neon-dark) 100%);
+    background: linear-gradient(90deg, var(--primary-dark) 0%, var(--primary) 50%, var(--primary-dark) 100%);
     background-size: 200% 100%;
     animation: shimmer 1.6s ease-in-out infinite;
   }
   @keyframes shimmer { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
-  .ps-done .ps-fill { width: 100%; background: var(--neon-dim); }
-
-  /* ── Hero banner (main page) ─────────────────────────────────────────── */
-  .hero-banner {
-    background: rgba(255,68,85,.04); border: 1px solid rgba(255,68,85,.1);
-    border-radius: 10px; padding: 14px 20px; margin-bottom: 22px;
-    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  }
-  .hero-penalty {
-    font-size: 1.1rem; font-weight: 900; color: var(--red);
-    text-shadow: 0 0 16px rgba(255,68,85,.5); white-space: nowrap; flex-shrink: 0;
-  }
-  .hero-penalty span { font-size: .68rem; font-weight: 700; vertical-align: middle; margin-left: 2px; }
-  .hero-text { font-size: .8rem; color: var(--muted); flex: 1; min-width: 180px; line-height: 1.5; }
-  .hero-learn { font-size: .76rem; color: var(--neon); text-decoration: none; font-weight: 800; white-space: nowrap; flex-shrink: 0; }
-  .hero-learn:hover { text-shadow: 0 0 10px rgba(0,255,127,.4); }
+  .ps-done .ps-fill { width: 100%; background: var(--green); }
 
   /* ── About page ──────────────────────────────────────────────────────── */
   .about-hero {
     text-align: center; padding: 40px 28px; position: relative; overflow: hidden;
-  }
-  .about-hero::before {
-    content:''; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(ellipse at 50% 10%, rgba(255,68,85,.08) 0%, transparent 65%);
+    background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 100%);
   }
   .about-tagline {
     font-size: 1.3rem; font-weight: 900; line-height: 1.35;
-    color: var(--neon); text-shadow: 0 0 24px rgba(0,255,127,.4); margin-bottom: 30px;
+    color: var(--primary); margin-bottom: 30px;
   }
   .about-penalty-num {
     font-size: 4rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums;
-    color: var(--red); text-shadow: 0 0 50px rgba(255,68,85,.65), 0 0 100px rgba(255,68,85,.2);
+    color: var(--red);
   }
   .about-penalty-label { font-size: .95rem; color: var(--text); font-weight: 700; margin-top: 10px; }
   .about-penalty-sub   { font-size: .76rem; color: var(--muted); margin-top: 4px; }
@@ -775,20 +743,20 @@ GLOBAL_CSS = """
   .risk-list, .feature-list, .consequence-list { list-style: none; display: grid; gap: 5px; margin-top: 4px; }
   .risk-list li {
     font-size: .86rem; padding: 8px 14px;
-    background: rgba(255,68,85,.04); border-left: 3px solid rgba(255,68,85,.28);
-    border-radius: 0 6px 6px 0; color: var(--text);
+    background: #FEF2F2; border-left: 3px solid #FCA5A5;
+    border-radius: 0 8px 8px 0; color: var(--text);
     display: flex; align-items: flex-start; gap: 9px; line-height: 1.45;
   }
   .feature-list li {
     font-size: .86rem; padding: 8px 14px;
-    background: rgba(0,255,127,.03); border-left: 3px solid rgba(0,255,127,.2);
-    border-radius: 0 6px 6px 0; color: var(--text);
+    background: #F0FDF4; border-left: 3px solid #86EFAC;
+    border-radius: 0 8px 8px 0; color: var(--text);
     display: flex; align-items: flex-start; gap: 9px; line-height: 1.45;
   }
   .consequence-list li {
     font-size: .86rem; padding: 8px 14px;
-    background: rgba(255,208,96,.03); border-left: 3px solid rgba(255,208,96,.2);
-    border-radius: 0 6px 6px 0; color: var(--text);
+    background: #FFFBEB; border-left: 3px solid #FCD34D;
+    border-radius: 0 8px 8px 0; color: var(--text);
     display: flex; align-items: flex-start; gap: 9px; line-height: 1.45;
   }
   .audience-grid {
@@ -796,31 +764,60 @@ GLOBAL_CSS = """
   }
   .audience-card {
     font-size: .84rem; padding: 14px 16px;
-    background: rgba(0,229,204,.04); border: 1px solid rgba(0,229,204,.1);
-    border-radius: 9px; color: var(--text); line-height: 1.45;
+    background: #F0FDFA; border: 1px solid #CCFBF1;
+    border-radius: 12px; color: var(--text); line-height: 1.45;
     display: flex; align-items: flex-start; gap: 10px;
   }
   .certbridge-badge {
-    display: inline-block; font-size: .7rem; font-weight: 800; text-transform: uppercase;
+    display: inline-block; font-size: .7rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: .08em; padding: 3px 10px; border-radius: 8px; margin-bottom: 12px;
-    background: rgba(0,229,204,.08); border: 1px solid rgba(0,229,204,.2); color: var(--cyan);
+    background: #CCFBF1; border: 1px solid #99F6E4; color: var(--teal);
   }
   .about-bottom-line {
-    font-size: 1.02rem; font-weight: 800; color: var(--neon);
-    text-shadow: 0 0 20px rgba(0,255,127,.35); line-height: 1.45;
-    text-align: center; margin-bottom: 12px;
+    font-size: 1.02rem; font-weight: 800; color: var(--primary);
+    line-height: 1.45; text-align: center; margin-bottom: 12px;
   }
   .about-bottom-sub { font-size: .86rem; color: var(--muted); text-align: center; line-height: 1.6; }
   .cta-btn {
     display: inline-block; margin-top: 22px;
-    background: var(--neon-dark); color: #c8ffd8;
-    border: 1px solid rgba(0,255,127,.28); border-radius: 8px;
-    padding: 12px 32px; font-size: .92rem; font-weight: 800; letter-spacing: .04em;
+    background: var(--primary); color: #fff;
+    border: none; border-radius: 10px;
+    padding: 12px 32px; font-size: .92rem; font-weight: 700;
     text-decoration: none;
-    transition: background .2s, box-shadow .2s;
-    box-shadow: 0 0 20px rgba(0,255,127,.14);
+    transition: background .15s, box-shadow .15s;
+    box-shadow: 0 2px 12px rgba(91,61,246,.3);
   }
-  .cta-btn:hover { background: var(--neon-dim); color: #030a06; box-shadow: 0 0 30px rgba(0,255,127,.35); }
+  .cta-btn:hover { background: var(--primary-dark); box-shadow: 0 4px 20px rgba(91,61,246,.4); }
+
+  /* ── Site footer ─────────────────────────────────────────────────────── */
+  .site-footer { background: var(--text); color: rgba(255,255,255,.7); padding: 40px 0 0; }
+  .site-footer-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 24px 32px;
+    display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 40px;
+  }
+  .footer-brand-name { font-size: 1rem; font-weight: 800; color: #fff; margin-bottom: 6px; }
+  .footer-brand-desc { font-size: .82rem; line-height: 1.6; color: rgba(255,255,255,.5); margin-bottom: 12px; }
+  .footer-disclaimer {
+    font-size: .73rem; color: rgba(255,255,255,.35); line-height: 1.55;
+    padding: 10px 14px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.07); border-radius: 8px; margin-top: 14px;
+  }
+  .footer-col h4 { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: rgba(255,255,255,.4); margin-bottom: 12px; }
+  .footer-col a  { display: block; font-size: .84rem; color: rgba(255,255,255,.6); text-decoration: none; margin-bottom: 8px; transition: color .15s; }
+  .footer-col a:hover { color: #fff; }
+  .footer-bottom {
+    max-width: 1100px; margin: 0 auto; padding: 18px 24px;
+    border-top: 1px solid rgba(255,255,255,.07);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  .footer-bottom-text { font-size: .76rem; color: rgba(255,255,255,.35); }
+
+  /* ── Mobile ──────────────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    header { padding: 12px 18px; }
+    .header-nav { display: none; }
+    .site-footer-inner { grid-template-columns: 1fr; gap: 28px; }
+  }
 """
 
 
@@ -835,31 +832,35 @@ BASE_TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ page_title }} — Organic Web Checker</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>{{ css | safe }}</style>
 </head>
 <body>
 <header>
-  <div>
-    <h1>Organic Web Checker</h1>
-    <p>Compare products marketed as organic on a website against the USDA Organic Integrity Database certificate</p>
-  </div>
+  <a href="/" class="header-logo">
+    <img src="/static/favicon.svg" class="header-logo-icon" alt="Organic Web Checker">
+    <span class="header-wordmark">Organic Web Checker</span>
+  </a>
   <div class="header-right">
     <nav class="header-nav">
-      <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Run Checker</a>
-      <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">About</a>
-      <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
+      <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Product</a>
+      <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">How It Works</a>
       <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
-      <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">Agents</a>
+      <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
+      <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">API</a>
       <a href="/account" class="nav-link {{ 'active' if active == 'account' else '' }}">Account</a>
     </nav>
+    <a href="/#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
         <img src="/static/favicon.svg" class="header-icon" alt="">
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
-        <a class="dropdown-item" href="/history">Web Check History</a>
-        <a class="dropdown-item" href="/pricing">Pricing Plan</a>
+        <a class="dropdown-item" href="/history">Check History</a>
+        <a class="dropdown-item" href="/pricing">Pricing</a>
         <a class="dropdown-item" href="/agents">Agents &amp; API</a>
         <a class="dropdown-item" href="/settings">Settings</a>
       </div>
@@ -869,6 +870,12 @@ BASE_TEMPLATE = """<!DOCTYPE html>
 <main class="page-main">
   {{ body | safe }}
 </main>
+<footer class="site-footer" style="margin-top:48px">
+  <div class="footer-bottom">
+    <span class="footer-bottom-text">&copy; 2026 Healer&rsquo;s Find LLC &mdash; Organic Web Checker</span>
+    <span class="footer-bottom-text">Not a certifier. Decision-support tool for compliance review.</span>
+  </div>
+</footer>
 <script>
 function toggleDd(e){e.stopPropagation();document.getElementById('hDd').classList.toggle('open');}
 document.addEventListener('click',()=>{const d=document.getElementById('hDd');if(d)d.classList.remove('open');});
@@ -1058,43 +1065,272 @@ MAIN_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Organic Web Checker — Automatic Organic Compliance Audits</title>
-  <meta name="description" content="Identify potential non-compliant organic claims on your website. Organic Web Checker compares your organic product listings against your live USDA Organic Integrity Database certificate for review.">
+  <title>Organic Web Checker — Compliance Review for Organic Brands &amp; Certifiers</title>
+  <meta name="description" content="Compare your website's organic product claims against your live USDA Organic Integrity Database certificate. Surface items for review before they become issues.">
   <meta property="og:title" content="Organic Web Checker — Organic Compliance Review Tool">
-  <meta property="og:description" content="Surface potential organic compliance gaps for review. Compares your website's organic product claims against your live USDA OID certificate.
+  <meta property="og:description" content="AI-assisted review comparing organic website claims against live OID certificate data.">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>""" + GLOBAL_CSS + """
-    /* main-page report card title */
-    .report-title {
-      font-size: .73rem; font-weight: 800; text-transform: uppercase;
-      letter-spacing: .1em; color: var(--muted); margin-bottom: 22px;
-      padding-bottom: 13px; border-bottom: 1px solid rgba(0,255,127,.08);
-    }
+  /* ── Landing page extras ─────────────────────────────────────────────── */
+  .report-title {
+    font-size: .73rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted); margin-bottom: 22px;
+    padding-bottom: 13px; border-bottom: 1px solid var(--border);
+  }
+  .landing-wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero-section {
+    padding: 72px 0 64px;
+    background: linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  .hero-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 24px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center;
+  }
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--lavender); color: var(--primary);
+    border: 1px solid rgba(91,61,246,.15);
+    border-radius: 20px; padding: 5px 14px;
+    font-size: .74rem; font-weight: 700; letter-spacing: .02em; margin-bottom: 20px;
+  }
+  .hero-eyebrow-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+  .hero-h1 {
+    font-size: 2.55rem; font-weight: 900; line-height: 1.18; letter-spacing: -.03em;
+    color: var(--text); margin-bottom: 20px;
+  }
+  .hero-h1 em { font-style: normal; color: var(--primary); }
+  .hero-sub {
+    font-size: 1.05rem; color: var(--muted); line-height: 1.7;
+    margin-bottom: 32px; max-width: 480px;
+  }
+  .hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+  .hero-btn-primary {
+    background: var(--primary); color: #fff;
+    border: none; border-radius: 10px; padding: 13px 28px;
+    font-size: .94rem; font-weight: 700; text-decoration: none; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(91,61,246,.35);
+    transition: background .15s, box-shadow .15s, transform .1s; display: inline-block;
+  }
+  .hero-btn-primary:hover { background: var(--primary-dark); box-shadow: 0 6px 24px rgba(91,61,246,.45); transform: translateY(-1px); }
+  .hero-btn-secondary {
+    background: var(--surface); color: var(--primary);
+    border: 1.5px solid rgba(91,61,246,.2); border-radius: 10px; padding: 13px 26px;
+    font-size: .94rem; font-weight: 600; text-decoration: none; cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s; display: inline-block;
+  }
+  .hero-btn-secondary:hover { background: var(--lavender); border-color: rgba(91,61,246,.35); transform: translateY(-1px); }
+  .hero-trust { display: flex; flex-wrap: wrap; gap: 16px; font-size: .81rem; color: var(--muted); }
+  .hero-trust-item { display: flex; align-items: center; gap: 6px; }
+  .hero-trust-check { color: var(--green); font-weight: 700; }
+
+  /* Hero mock card */
+  .hero-mock-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 26px;
+    box-shadow: 0 20px 60px rgba(91,61,246,.12), 0 2px 12px rgba(15,23,42,.08);
+  }
+  .hero-card-header {
+    font-size: .72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; color: var(--muted); margin-bottom: 18px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .hero-card-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .mock-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 0; border-bottom: 1px solid var(--border);
+  }
+  .mock-row:last-of-type { border-bottom: none; }
+  .mock-row-label { font-size: .86rem; color: var(--text); font-weight: 500; }
+  .chip { font-size: .72rem; font-weight: 700; padding: 4px 11px; border-radius: 20px; border: 1px solid; }
+  .chip-green   { background: #DCFCE7; color: #16A34A; border-color: #86EFAC; }
+  .chip-amber   { background: #FEF3C7; color: #D97706; border-color: #FDE68A; }
+  .chip-red     { background: #FEE2E2; color: #DC2626; border-color: #FCA5A5; }
+  .chip-neutral { background: var(--lavender); color: var(--primary); border-color: rgba(91,61,246,.2); }
+  .mock-divider { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 14px 0 10px; }
+  .mock-flag-item {
+    font-size: .82rem; padding: 8px 12px;
+    background: #FEF2F2; border-left: 3px solid #FCA5A5;
+    border-radius: 0 8px 8px 0; margin-bottom: 5px; color: var(--text);
+  }
+  .mock-ok-item {
+    font-size: .82rem; padding: 8px 12px;
+    background: #F0FDF4; border-left: 3px solid #86EFAC;
+    border-radius: 0 8px 8px 0; color: var(--text);
+  }
+  .hero-card-footer {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+    font-size: .72rem; color: var(--dim); text-align: center;
+  }
+
+  /* Trust bar */
+  .trust-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 22px 0; }
+  .trust-bar-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 24px;
+    display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px;
+  }
+  .trust-bar-label { font-size: .78rem; font-weight: 600; color: var(--muted); margin-right: 24px; white-space: nowrap; }
+  .trust-bar-items { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; }
+  .trust-bar-item  { font-size: .82rem; color: var(--muted); display: flex; align-items: center; gap: 8px; font-weight: 500; }
+  .trust-bar-icon  {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--lavender); display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+  }
+
+  /* Features */
+  .features-section { padding: 72px 0; background: var(--bg); }
+  .section-header   { text-align: center; margin-bottom: 48px; }
+  .section-label-sm {
+    display: inline-block; font-size: .72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--primary); margin-bottom: 12px;
+  }
+  .section-h2 {
+    font-size: 1.85rem; font-weight: 900; color: var(--text);
+    letter-spacing: -.02em; line-height: 1.2; margin-bottom: 14px;
+  }
+  .section-sub { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 520px; margin: 0 auto; }
+  .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px,1fr)); gap: 20px; }
+  .feature-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 26px 24px;
+    transition: transform .15s, box-shadow .15s, border-color .15s;
+    box-shadow: 0 1px 8px rgba(15,23,42,.04);
+  }
+  .feature-card:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(91,61,246,.09); border-color: rgba(91,61,246,.15); }
+  .feature-icon {
+    width: 42px; height: 42px; border-radius: 12px;
+    background: var(--lavender); display: flex; align-items: center; justify-content: center;
+    font-size: 20px; margin-bottom: 16px;
+  }
+  .feature-card-title { font-size: .95rem; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+  .feature-card-desc  { font-size: .84rem; color: var(--muted); line-height: 1.6; }
+
+  /* How it works */
+  .hiw-section {
+    padding: 72px 0;
+    background: linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%);
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .hiw-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 0; }
+  .hiw-step  { padding: 24px 28px 24px 0; }
+  .hiw-step-num {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--primary); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .84rem; font-weight: 800; margin-bottom: 14px;
+  }
+  .hiw-step-title { font-size: .95rem; font-weight: 800; color: var(--text); margin-bottom: 6px; }
+  .hiw-step-desc  { font-size: .84rem; color: var(--muted); line-height: 1.6; }
+
+  /* Sample output */
+  .sample-section { padding: 72px 0; background: var(--bg); }
+  .sample-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 24px;
+    display: grid; grid-template-columns: 1fr 1.2fr; gap: 56px; align-items: start;
+  }
+  .sample-left { padding-top: 12px; }
+  .sample-left p { font-size: .92rem; color: var(--muted); line-height: 1.7; margin-top: 14px; }
+  .sample-report {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; overflow: hidden; box-shadow: 0 8px 40px rgba(15,23,42,.08);
+  }
+  .sample-report-header {
+    background: var(--bg); padding: 16px 22px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sample-op-name { font-size: .92rem; font-weight: 800; color: var(--text); }
+  .sample-op-meta { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+  .sample-summary { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid var(--border); }
+  .sample-stat { padding: 16px 18px; text-align: center; border-right: 1px solid var(--border); }
+  .sample-stat:last-child { border-right: none; }
+  .sample-stat-num { font-size: 1.5rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .sample-stat-lbl { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-top: 4px; }
+  .sample-stat.red   .sample-stat-num { color: var(--red); }
+  .sample-stat.amber .sample-stat-num { color: var(--amber); }
+  .sample-stat.green .sample-stat-num { color: var(--green); }
+  .sample-items { padding: 16px 22px; }
+  .sample-section-head { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 8px; }
+  .sample-flag-item {
+    font-size: .84rem; padding: 9px 13px; background: #FEF2F2; border-left: 3px solid #FCA5A5;
+    border-radius: 0 8px 8px 0; margin-bottom: 5px; color: var(--text);
+  }
+  .sample-ok-item {
+    font-size: .84rem; padding: 9px 13px; background: #F0FDF4; border-left: 3px solid #86EFAC;
+    border-radius: 0 8px 8px 0; margin-bottom: 5px; color: var(--text);
+  }
+  .sample-report-footer {
+    padding: 12px 22px; background: var(--bg); border-top: 1px solid var(--border);
+    font-size: .72rem; color: var(--dim); text-align: center;
+  }
+
+  /* AI Transparency */
+  .ai-section {
+    padding: 72px 0; background: var(--surface);
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .ai-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 24px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center;
+  }
+  .ai-cards { display: grid; gap: 14px; }
+  .ai-card  { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; }
+  .ai-card-icon  { font-size: 22px; margin-bottom: 10px; }
+  .ai-card-title { font-size: .9rem; font-weight: 800; color: var(--text); margin-bottom: 6px; }
+  .ai-card-desc  { font-size: .83rem; color: var(--muted); line-height: 1.6; }
+
+  /* Run-check section */
+  .run-check-section { padding: 72px 0; background: var(--bg); }
+  .run-check-inner   { max-width: 640px; margin: 0 auto; padding: 0 24px; }
+
+  /* Mobile */
+  @media (max-width: 768px) {
+    .hero-inner   { grid-template-columns: 1fr; gap: 36px; }
+    .hero-h1      { font-size: 2rem; }
+    .hero-right   { display: none; }
+    .sample-inner { grid-template-columns: 1fr; gap: 32px; }
+    .ai-inner     { grid-template-columns: 1fr; gap: 32px; }
+    .hiw-steps    { grid-template-columns: 1fr; }
+    .hero-section, .features-section, .hiw-section, .sample-section, .ai-section, .run-check-section { padding: 48px 0; }
+    .trust-bar-label { margin-right: 0; margin-bottom: 10px; width: 100%; text-align: center; }
+  }
+  @media (max-width: 480px) {
+    .hero-h1    { font-size: 1.7rem; }
+    .section-h2 { font-size: 1.45rem; }
+  }
   </style>
 </head>
 <body>
+
 <header>
-  <div>
-    <h1>Organic Web Checker</h1>
-    <p>Compare products marketed as organic on a website against the USDA Organic Integrity Database certificate</p>
-  </div>
+  <a href="/" class="header-logo">
+    <img src="/static/favicon.svg" class="header-logo-icon" alt="Organic Web Checker">
+    <span class="header-wordmark">Organic Web Checker</span>
+  </a>
   <div class="header-right">
     <nav class="header-nav">
-      <a href="/"        class="nav-link active">Run Checker</a>
-      <a href="/about"   class="nav-link">About</a>
-      <a href="/history" class="nav-link">History</a>
+      <a href="/"        class="nav-link active">Product</a>
+      <a href="/about"   class="nav-link">How It Works</a>
       <a href="/pricing" class="nav-link">Pricing</a>
-      <a href="/agents"  class="nav-link">Agents</a>
+      <a href="/history" class="nav-link">History</a>
+      <a href="/agents"  class="nav-link">API</a>
       <a href="/account" class="nav-link">Account</a>
     </nav>
+    <a href="#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
         <img src="/static/favicon.svg" class="header-icon" alt="">
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
-        <a class="dropdown-item" href="/history">Web Check History</a>
-        <a class="dropdown-item" href="/pricing">Pricing Plan</a>
+        <a class="dropdown-item" href="/history">Check History</a>
+        <a class="dropdown-item" href="/pricing">Pricing</a>
         <a class="dropdown-item" href="/agents">Agents &amp; API</a>
         <a class="dropdown-item" href="/settings">Settings</a>
       </div>
@@ -1102,104 +1338,332 @@ MAIN_HTML = """<!DOCTYPE html>
   </div>
 </header>
 
-<main class="page-main">
-  <div class="hero-banner">
-    <div class="hero-penalty">$22,974<span>&thinsp;/ violation</span></div>
-    <div class="hero-text">Identify potential non-compliant organic claims for review &mdash; compares your website product listings against your live USDA Organic Integrity Database certificate.</div>
-    <a href="/about" class="hero-learn">Learn more &rarr;</a>
-  </div>
-
-  <div class="stats-counter" id="statsCounter">
-    <div class="sc-box sc-checks">
-      <div class="sc-num" id="scChecks">0</div>
-      <div class="sc-lbl">Checks This Session</div>
-    </div>
-    <div class="sc-box sc-flags">
-      <div class="sc-num" id="scFlags">0</div>
-      <div class="sc-lbl">Flags Detected</div>
-    </div>
-    <div class="sc-box sc-fines">
-      <div class="sc-num" id="scFines">0</div>
-      <div class="sc-lbl">Items for Review</div>
-    </div>
-  </div>
-
-  <div class="card" id="progressPanel" style="display:none">
-    <div class="ps-header">Running Checker <span class="ps-spin">&#8635;</span></div>
-    <div id="pstep1" class="progress-step ps-pending">
-      <div class="ps-num">1</div>
-      <div class="ps-info">
-        <div class="ps-name">Connect to USDA Organic Integrity Database</div>
-        <div class="ps-msg" id="pmsg1">Waiting&hellip;</div>
+<!-- HERO -->
+<section class="hero-section">
+  <div class="hero-inner">
+    <div class="hero-left">
+      <div class="hero-eyebrow">
+        <span class="hero-eyebrow-dot"></span>
+        Live USDA OID Certificate Comparison
       </div>
-      <div class="ps-bar"><div class="ps-fill"></div></div>
-    </div>
-    <div id="pstep2" class="progress-step ps-pending">
-      <div class="ps-num">2</div>
-      <div class="ps-info">
-        <div class="ps-name">Load OID certificate</div>
-        <div class="ps-msg" id="pmsg2">&mdash;</div>
+      <h1 class="hero-h1">Organic compliance<br>intelligence for<br><em>modern brands</em></h1>
+      <p class="hero-sub">Compare your website&rsquo;s organic product claims against your live USDA certificate. Surface items for review before they become issues.</p>
+      <div class="hero-ctas">
+        <a href="#run-check" class="hero-btn-primary">Run a Check</a>
+        <a href="#sample-output" class="hero-btn-secondary">View Sample Results</a>
       </div>
-      <div class="ps-bar"><div class="ps-fill"></div></div>
-    </div>
-    <div id="pstep3" class="progress-step ps-pending">
-      <div class="ps-num">3</div>
-      <div class="ps-info">
-        <div class="ps-name">Scan website for organic product claims</div>
-        <div class="ps-msg" id="pmsg3">&mdash;</div>
+      <div class="hero-trust">
+        <span class="hero-trust-item"><span class="hero-trust-check">&#10003;</span> AI-assisted review</span>
+        <span class="hero-trust-item"><span class="hero-trust-check">&#10003;</span> Live certificate comparison</span>
+        <span class="hero-trust-item"><span class="hero-trust-check">&#10003;</span> Built for certifiers, handlers &amp; consultants</span>
       </div>
-      <div class="ps-bar"><div class="ps-fill"></div></div>
     </div>
-    <div id="pstep4" class="progress-step ps-pending">
-      <div class="ps-num">4</div>
-      <div class="ps-info">
-        <div class="ps-name">Compare claims against certificate</div>
-        <div class="ps-msg" id="pmsg4">&mdash;</div>
+    <div class="hero-right">
+      <div class="hero-mock-card">
+        <div class="hero-card-header">
+          <span class="hero-card-dot"></span>
+          Compliance Review &mdash; Green Valley Organics
+        </div>
+        <div class="mock-row">
+          <span class="mock-row-label">Certificate Status</span>
+          <span class="chip chip-green">Verified</span>
+        </div>
+        <div class="mock-row">
+          <span class="mock-row-label">Potential Review Flags</span>
+          <span class="chip chip-amber">2 items</span>
+        </div>
+        <div class="mock-row">
+          <span class="mock-row-label">Claim Consistency</span>
+          <span class="chip chip-neutral">94%</span>
+        </div>
+        <div class="mock-row">
+          <span class="mock-row-label">Products Verified</span>
+          <span class="chip chip-green">18 matched</span>
+        </div>
+        <div class="mock-divider">Items surfaced for review</div>
+        <div class="mock-flag-item">&#9888; Organic Valley Flax Oil</div>
+        <div class="mock-ok-item">&#10003; Organic Meadow Blend &mdash; on certificate</div>
+        <div class="hero-card-footer">AI-assisted review &bull; Human judgment required for compliance decisions</div>
       </div>
-      <div class="ps-bar"><div class="ps-fill"></div></div>
     </div>
   </div>
+</section>
 
-  <div class="card">
-    <form id="checkForm">
-      <label for="operation">Operation Name (as listed in OID)</label>
-      <input type="text" id="operation" name="operation"
-             placeholder="e.g. GREEN RIDGE ORGANICS LLC"
-             value="{{ prefill_op or '' }}" required>
-      <label for="website">Website URL</label>
-      <input type="text" id="website" name="website"
-             placeholder="e.g. https://greenridgeorganics.com"
-             value="{{ prefill_url or '' }}" required>
-      <div class="hint">Supports Shopify, WooCommerce, BigCommerce, and most product websites</div>
-      <button type="submit" id="submitBtn">Run Checker</button>
-    </form>
-  </div>
-
-  <div class="form-stats" id="formStats">
-    <div class="form-stat-item">
-      <span>Total checks run:</span>
-      <span class="form-stat-num" id="fsChecks">0</span>
-    </div>
-    <div class="form-stat-item">
-      <span>Possible violations surfaced:</span>
-      <span class="form-stat-num red" id="fsFlags">0</span>
+<!-- TRUST BAR -->
+<section class="trust-bar">
+  <div class="trust-bar-inner">
+    <span class="trust-bar-label">Built for</span>
+    <div class="trust-bar-items">
+      <span class="trust-bar-item"><span class="trust-bar-icon">&#127807;</span> Organic handlers &amp; brands</span>
+      <span class="trust-bar-item"><span class="trust-bar-icon">&#128269;</span> Certifying agents</span>
+      <span class="trust-bar-item"><span class="trust-bar-icon">&#128101;</span> Compliance consultants</span>
+      <span class="trust-bar-item"><span class="trust-bar-icon">&#127991;</span> Private label operations</span>
     </div>
   </div>
+</section>
 
-  <div class="queue-panel" id="queuePanel" style="display:none">
-    <div class="queue-header">
-      Checkers <span class="queue-count" id="queueCount">0</span>
+<!-- FEATURES -->
+<section class="features-section">
+  <div class="landing-wrap">
+    <div class="section-header">
+      <div class="section-label-sm">What it does</div>
+      <h2 class="section-h2">A complete compliance review workflow</h2>
+      <p class="section-sub">From website scan to structured report &mdash; every step designed for organic certification workflows.</p>
     </div>
-    <ul class="queue-list" id="queueList">
-      <li class="empty-queue">No checkers yet</li>
-    </ul>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">&#128269;</div>
+        <div class="feature-card-title">Website Claim Review</div>
+        <div class="feature-card-desc">Scans product pages on Shopify, WooCommerce, BigCommerce, and most product websites for organic claims.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128196;</div>
+        <div class="feature-card-title">Certificate Comparison</div>
+        <div class="feature-card-desc">Pulls the live certificate directly from the USDA Organic Integrity Database and compares it against what&rsquo;s published online.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#9888;</div>
+        <div class="feature-card-title">Compliance Flagging</div>
+        <div class="feature-card-desc">Surfaces products that may not appear on the current certificate scope &mdash; flagged, caution, and marketing language categories.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128203;</div>
+        <div class="feature-card-title">Results &amp; Audit Trail</div>
+        <div class="feature-card-desc">Exports structured reports as Markdown or PDF. Check history is retained for repeat reviews and audit documentation.</div>
+      </div>
+    </div>
   </div>
+</section>
 
-  <div class="card" id="reportCard" style="display:none">
-    <div class="report-title" id="reportTitle">Results</div>
-    <div id="reportBody"></div>
+<!-- HOW IT WORKS -->
+<section class="hiw-section">
+  <div class="landing-wrap">
+    <div class="section-header">
+      <div class="section-label-sm">The process</div>
+      <h2 class="section-h2">How a check works</h2>
+      <p class="section-sub">Enter an operation name and website. The checker handles the rest in about 60 seconds.</p>
+    </div>
+    <div class="hiw-steps">
+      <div class="hiw-step">
+        <div class="hiw-step-num">1</div>
+        <div class="hiw-step-title">Identify the operation</div>
+        <div class="hiw-step-desc">Enter the operation name as it appears in the USDA Organic Integrity Database and the website URL to check.</div>
+      </div>
+      <div class="hiw-step">
+        <div class="hiw-step-num">2</div>
+        <div class="hiw-step-title">Load certificate data</div>
+        <div class="hiw-step-desc">The checker connects to the live OID and retrieves the current certificate scope &mdash; the products actually approved.</div>
+      </div>
+      <div class="hiw-step">
+        <div class="hiw-step-num">3</div>
+        <div class="hiw-step-title">Scan organic claims</div>
+        <div class="hiw-step-desc">Every product page on the website is scanned for organic claims &mdash; titles, labels, and product descriptions.</div>
+      </div>
+      <div class="hiw-step">
+        <div class="hiw-step-num">4</div>
+        <div class="hiw-step-title">Surface review items</div>
+        <div class="hiw-step-desc">Claims are compared against the certificate. Items that may need review are surfaced in a structured, exportable report.</div>
+      </div>
+    </div>
   </div>
-</main>
+</section>
+
+<!-- SAMPLE OUTPUT -->
+<section class="sample-section" id="sample-output">
+  <div class="sample-inner">
+    <div class="sample-left">
+      <div class="section-label-sm">Sample output</div>
+      <h2 class="section-h2">What a report looks like</h2>
+      <p>Each check produces a structured compliance review: operation details, certificate scope, and a categorized list of items surfaced for review.</p>
+      <p>Flagged items link directly to the product page on the website for fast manual verification.</p>
+      <div style="margin-top:28px">
+        <a href="#run-check" class="hero-btn-primary" style="font-size:.88rem;padding:11px 24px">Run a check on your operation &rarr;</a>
+      </div>
+    </div>
+    <div class="sample-report">
+      <div class="sample-report-header">
+        <div>
+          <div class="sample-op-name">Green Valley Organics LLC</div>
+          <div class="sample-op-meta">MOSA Organic &bull; Certified &bull; Portland, OR &bull; greenvalleyorganics.com</div>
+        </div>
+        <span class="chip chip-amber">2 items for review</span>
+      </div>
+      <div class="sample-summary">
+        <div class="sample-stat red"><div class="sample-stat-num">2</div><div class="sample-stat-lbl">Review Flags</div></div>
+        <div class="sample-stat amber"><div class="sample-stat-num">1</div><div class="sample-stat-lbl">Caution</div></div>
+        <div class="sample-stat green"><div class="sample-stat-num">18</div><div class="sample-stat-lbl">Verified</div></div>
+      </div>
+      <div class="sample-items">
+        <div class="sample-section-head">&#128308; Items for review &mdash; not found on certificate</div>
+        <div class="sample-flag-item">&#9888; Organic Valley Flax Oil &mdash; 16oz</div>
+        <div class="sample-flag-item">&#9888; Organic Meadow Blend Supplement</div>
+        <div style="margin-top:14px">
+          <div class="sample-section-head">&#10003; Confirmed on certificate</div>
+          <div class="sample-ok-item">&#10003; Organic Cold-Pressed Coconut Oil</div>
+          <div class="sample-ok-item">&#10003; Organic Raw Honey &mdash; Wildflower</div>
+        </div>
+      </div>
+      <div class="sample-report-footer">AI-assisted review &bull; Regulatory ref: 7 CFR Part 205 &bull; Human review required</div>
+    </div>
+  </div>
+</section>
+
+<!-- AI TRANSPARENCY -->
+<section class="ai-section">
+  <div class="ai-inner">
+    <div>
+      <div class="section-label-sm">How AI is used</div>
+      <h2 class="section-h2">Transparent by design</h2>
+      <p style="font-size:.95rem;color:var(--muted);line-height:1.7;margin-top:14px;margin-bottom:20px">
+        Organic Web Checker uses AI to assist the review process &mdash; not to replace the judgment of certifiers, compliance specialists, or handlers. Every output is structured for human review.
+      </p>
+      <p style="font-size:.84rem;color:var(--muted);line-height:1.7">
+        This tool surfaces potential items for consideration. It does not make compliance determinations, does not issue certifications, and is not a substitute for a qualified certifier&rsquo;s review.
+      </p>
+    </div>
+    <div class="ai-cards">
+      <div class="ai-card">
+        <div class="ai-card-icon">&#129302;</div>
+        <div class="ai-card-title">AI assists the review</div>
+        <div class="ai-card-desc">Automated scanning and matching identifies potential gaps between what&rsquo;s marketed as organic and what&rsquo;s on the current OID certificate.</div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-card-icon">&#128100;</div>
+        <div class="ai-card-title">Humans make the call</div>
+        <div class="ai-card-desc">Flagged items require human review. Name variations, reformulations, and context all require certifier judgment &mdash; not automation.</div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-card-icon">&#128203;</div>
+        <div class="ai-card-title">Decision support, not a certifier</div>
+        <div class="ai-card-desc">Results are structured for use in a broader compliance workflow. Organic Web Checker is a review tool, not a regulatory authority.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RUN A CHECK -->
+<section class="run-check-section" id="run-check">
+  <div class="run-check-inner">
+    <div style="margin-bottom:28px">
+      <div class="section-label-sm">Run a check</div>
+      <h2 class="section-h2" style="font-size:1.6rem">Check an operation now</h2>
+      <p style="font-size:.92rem;color:var(--muted);margin-top:8px;line-height:1.6">Enter the operation name exactly as it appears in OID and the website URL to check.</p>
+    </div>
+
+    <div class="card" id="progressPanel" style="display:none">
+      <div class="ps-header">Running Check <span class="ps-spin">&#8635;</span></div>
+      <div id="pstep1" class="progress-step ps-pending">
+        <div class="ps-num">1</div>
+        <div class="ps-info">
+          <div class="ps-name">Connect to USDA Organic Integrity Database</div>
+          <div class="ps-msg" id="pmsg1">Waiting&hellip;</div>
+        </div>
+        <div class="ps-bar"><div class="ps-fill"></div></div>
+      </div>
+      <div id="pstep2" class="progress-step ps-pending">
+        <div class="ps-num">2</div>
+        <div class="ps-info">
+          <div class="ps-name">Load OID certificate</div>
+          <div class="ps-msg" id="pmsg2">&mdash;</div>
+        </div>
+        <div class="ps-bar"><div class="ps-fill"></div></div>
+      </div>
+      <div id="pstep3" class="progress-step ps-pending">
+        <div class="ps-num">3</div>
+        <div class="ps-info">
+          <div class="ps-name">Scan website for organic product claims</div>
+          <div class="ps-msg" id="pmsg3">&mdash;</div>
+        </div>
+        <div class="ps-bar"><div class="ps-fill"></div></div>
+      </div>
+      <div id="pstep4" class="progress-step ps-pending">
+        <div class="ps-num">4</div>
+        <div class="ps-info">
+          <div class="ps-name">Compare claims against certificate</div>
+          <div class="ps-msg" id="pmsg4">&mdash;</div>
+        </div>
+        <div class="ps-bar"><div class="ps-fill"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <form id="checkForm">
+        <label for="operation">Operation Name (as listed in OID)</label>
+        <input type="text" id="operation" name="operation"
+               placeholder="e.g. GREEN RIDGE ORGANICS LLC"
+               value="{{ prefill_op or '' }}" required>
+        <label for="website">Website URL</label>
+        <input type="text" id="website" name="website"
+               placeholder="e.g. https://greenridgeorganics.com"
+               value="{{ prefill_url or '' }}" required>
+        <div class="hint">Supports Shopify, WooCommerce, BigCommerce, and most product websites</div>
+        <button type="submit" id="submitBtn">Run Check</button>
+      </form>
+    </div>
+
+    <div class="form-stats" id="formStats">
+      <div class="form-stat-item">
+        <span>Total checks run:</span>
+        <span class="form-stat-num" id="fsChecks">0</span>
+      </div>
+      <div class="form-stat-item">
+        <span>Possible violations surfaced:</span>
+        <span class="form-stat-num red" id="fsFlags">0</span>
+      </div>
+    </div>
+
+    <div class="queue-panel" id="queuePanel" style="display:none">
+      <div class="queue-header">
+        Checks <span class="queue-count" id="queueCount">0</span>
+      </div>
+      <ul class="queue-list" id="queueList">
+        <li class="empty-queue">No checks yet</li>
+      </ul>
+    </div>
+
+    <div class="card" id="reportCard" style="display:none">
+      <div class="report-title" id="reportTitle">Results</div>
+      <div id="reportBody"></div>
+    </div>
+
+    <!-- Hidden stat elements kept for JS compat -->
+    <div id="statsCounter" style="display:none">
+      <span id="scChecks">0</span><span id="scFlags">0</span><span id="scFines">0</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <div class="site-footer-inner">
+    <div class="footer-brand">
+      <div class="footer-brand-name">Organic Web Checker</div>
+      <div class="footer-brand-desc">AI-assisted organic compliance review for handlers, certifiers, and compliance teams. Compares website claims against live USDA OID certificate data.</div>
+      <div class="footer-disclaimer">
+        Not a certifying agent. Results are decision-support only and require human review.<br>
+        Not a substitute for a qualified certifier&rsquo;s judgment. Regulatory reference: 7 CFR Part 205 &mdash; USDA National Organic Program.
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>Product</h4>
+      <a href="#run-check">Run a Check</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/history">History</a>
+      <a href="/agents">Agents &amp; API</a>
+    </div>
+    <div class="footer-col">
+      <h4>Account</h4>
+      <a href="/account">Sign In</a>
+      <a href="/pricing">Purchase Credits</a>
+      <a href="mailto:hello@organicwebchecker.com">Contact</a>
+      <a href="/about">About</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span class="footer-bottom-text">&copy; 2026 Healer&rsquo;s Find LLC &mdash; Organic Web Checker. All rights reserved.</span>
+    <span class="footer-bottom-text">Not a certifier. Decision-support tool for compliance review.</span>
+  </div>
+</footer>
 
 <script>
   const ACTIVE_JOB = {{ ('"' + active_job + '"') | safe if active_job else 'null' }};
@@ -1217,14 +1681,14 @@ MAIN_HTML = """<!DOCTYPE html>
     const res  = await fetch('/check', {method:'POST', body: new URLSearchParams(new FormData(e.target))});
     const data = await res.json();
     viewingJobId = data.job_id;
-    btn.disabled = false; btn.textContent = 'Run Checker';
+    btn.disabled = false; btn.textContent = 'Run Check';
     refreshQueue();
     startPolling(data.job_id);
   });
 
   // ── Progress panel ───────────────────────────────────────────────────────
   const STEP_NAMES = [
-    '', // 1-indexed
+    '',
     'Connect to USDA Organic Integrity Database',
     'Load OID certificate',
     'Scan website for organic product claims',
@@ -1275,6 +1739,7 @@ MAIN_HTML = """<!DOCTYPE html>
   function startPolling(jobId) {
     clearInterval(pollTimer);
     document.getElementById('progressPanel').style.display = 'block';
+    document.getElementById('progressPanel').scrollIntoView({behavior:'smooth', block:'start'});
     pollTimer = setInterval(async () => {
       const res = await fetch('/job/' + jobId);
       const job = await res.json();
@@ -1340,11 +1805,11 @@ MAIN_HTML = """<!DOCTYPE html>
 # ---------------------------------------------------------------------------
 
 TIERS = [
-    {"count": 1,   "price": 4.99, "per": 4.99, "disc": None,    "name": "Spot Check",     "desc": "One operation, one verification. Perfect for a first-time check or quick one-off audit.", "featured": False},
-    {"count": 10,  "price": 39,   "per": 3.90, "disc": "22% off","name": "Small Certifier","desc": "Occasional compliance spot checks for up to 10 client operations. Great for smaller certifiers doing periodic reviews.", "featured": False},
-    {"count": 25,  "price": 85,   "per": 3.40, "disc": "32% off","name": "Growing Program","desc": "Regular compliance reviews for an active client roster. Ideal for certifiers building a systematic review program.", "featured": True},
-    {"count": 50,  "price": 149,  "per": 2.98, "disc": "40% off","name": "Active Certifier","desc": "Monthly compliance cycles for mid-size operations. Covers a full seasonal review or pre-audit sweep.", "featured": False},
-    {"count": 100, "price": 259,  "per": 2.59, "disc": "48% off","name": "High Volume",     "desc": "Systematic quarterly reviews across a full client base. Built for large certifiers with 100+ operations.", "featured": False},
+    {"count": 1,   "price": 4.99, "per": 4.99, "disc": None,    "name": "Spot Check",     "desc": "Run one check on your operation's website. Great for a first self-review, a quick verification before a certification renewal, or a one-off product claim audit.", "featured": False},
+    {"count": 10,  "price": 39,   "per": 3.90, "disc": "22% off","name": "Small Operation","desc": "Ten checks for handlers and brands doing periodic self-audits, reviewing seasonal product updates, or spot-checking specific sections of a product catalog.", "featured": False},
+    {"count": 25,  "price": 85,   "per": 3.40, "disc": "32% off","name": "Active Brand",   "desc": "Regular compliance reviews for growing operations. Ideal for brands with ongoing product changes, and for certifiers or consultants doing structured check-ins across a handful of clients.", "featured": True},
+    {"count": 50,  "price": 149,  "per": 2.98, "disc": "40% off","name": "Full Audit",     "desc": "Comprehensive coverage for established organic brands. Run full catalog sweeps, pre-certification reviews, or systematic checks across multiple site sections and product lines.", "featured": False},
+    {"count": 100, "price": 259,  "per": 2.59, "disc": "48% off","name": "High Volume",    "desc": "For large operations, multi-brand portfolios, and certifiers running systematic reviews across a full client roster. Covers quarterly review cycles at scale.", "featured": False},
 ]
 
 def pricing_page_html():
