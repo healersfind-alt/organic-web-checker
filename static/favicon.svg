@@ -2,132 +2,132 @@
   <title>Organic Web Checker</title>
   <defs>
 
-    <!-- Drop shadow filter -->
+    <!-- Drop shadow blur -->
     <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="9"/>
     </filter>
 
-    <!-- Glass shell: translucent lavender-purple, bright at top-center, deeper at edges -->
-    <radialGradient id="glass" cx="50%" cy="30%" r="68%">
-      <stop offset="0%"   stop-color="#EDE5FF"/>
-      <stop offset="35%"  stop-color="#C4AAFB"/>
-      <stop offset="72%"  stop-color="#9060D8"/>
-      <stop offset="100%" stop-color="#7040BC"/>
+    <!--
+      GLASS SHELL: light lavender that looks like translucent purple glass.
+      Very light at center/top, slightly more saturated at outer edges/corners
+      (simulates glass being thicker at the rim).
+    -->
+    <radialGradient id="glassBody" cx="50%" cy="42%" r="58%">
+      <stop offset="0%"   stop-color="#EEE6FF"/>
+      <stop offset="38%"  stop-color="#D6C2F6"/>
+      <stop offset="68%"  stop-color="#B89CE8"/>
+      <stop offset="88%"  stop-color="#9878D0"/>
+      <stop offset="100%" stop-color="#8060BE"/>
     </radialGradient>
 
-    <!-- Glass top specular highlight (bright arc across upper shell) -->
-    <radialGradient id="glassTopGlow" cx="50%" cy="4%" r="42%">
-      <stop offset="0%"   stop-color="white" stop-opacity="0.88"/>
-      <stop offset="45%"  stop-color="white" stop-opacity="0.22"/>
+    <!-- Top specular: bright white light reflecting off the top glass face -->
+    <radialGradient id="topSpec" cx="50%" cy="2%" r="44%">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.92"/>
+      <stop offset="42%"  stop-color="white" stop-opacity="0.28"/>
       <stop offset="100%" stop-color="white" stop-opacity="0"/>
     </radialGradient>
 
-    <!-- Bottom rim glow: pink-purple bleed at base of shell -->
-    <radialGradient id="rimGlow" cx="50%" cy="100%" r="52%">
-      <stop offset="0%"   stop-color="#E060FF" stop-opacity="0.92"/>
-      <stop offset="45%"  stop-color="#B050D8" stop-opacity="0.40"/>
-      <stop offset="100%" stop-color="#8030B0" stop-opacity="0"/>
+    <!-- Bottom rim glow: pink-purple light bleeding at the base -->
+    <radialGradient id="rimGlow" cx="50%" cy="100%" r="50%">
+      <stop offset="0%"   stop-color="#D855F8" stop-opacity="0.88"/>
+      <stop offset="44%"  stop-color="#B03DD8" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#8028B8" stop-opacity="0"/>
     </radialGradient>
 
-    <!-- Inner floor: white, barely-there lavender tint toward edges -->
-    <radialGradient id="floor" cx="50%" cy="42%" r="62%">
+    <!-- Inner floor: white, barely any tint — the "hollow" inside the glass -->
+    <radialGradient id="floor" cx="50%" cy="44%" r="58%">
       <stop offset="0%"   stop-color="#FFFFFF"/>
-      <stop offset="65%"  stop-color="#F6F0FF"/>
-      <stop offset="100%" stop-color="#EAE0FF"/>
+      <stop offset="72%"  stop-color="#F9F4FF"/>
+      <stop offset="100%" stop-color="#F0E8FF"/>
     </radialGradient>
 
-    <!-- Inner-edge depth shadow: simulates glass thickness at inner bezel edge -->
+    <!-- Inner-edge depth shadow: glass thickness visible where bezel meets floor -->
     <radialGradient id="depthRing" cx="50%" cy="50%" r="50%">
-      <stop offset="63%"  stop-color="rgba(70,10,140,0)"/>
-      <stop offset="84%"  stop-color="rgba(70,10,140,0.16)"/>
-      <stop offset="100%" stop-color="rgba(70,10,140,0.38)"/>
+      <stop offset="60%"  stop-color="rgba(75,15,155,0)"/>
+      <stop offset="83%"  stop-color="rgba(75,15,155,0.13)"/>
+      <stop offset="100%" stop-color="rgba(75,15,155,0.30)"/>
     </radialGradient>
 
-    <!-- Green tile: radial pillow/convex — white highlight at top, vivid green body, darker base -->
-    <!-- gradientUnits=objectBoundingBox (default): coords are % of each tile's own bbox -->
-    <radialGradient id="gtile" cx="50%" cy="22%" r="80%">
-      <stop offset="0%"   stop-color="#DFFFD8"/>
-      <stop offset="18%"  stop-color="#9CE890"/>
-      <stop offset="52%"  stop-color="#54C84C"/>
-      <stop offset="100%" stop-color="#2E9C28"/>
-    </radialGradient>
+    <!--
+      GREEN TILE: flat glass panel look.
+      Linear gradient — very bright mint at top (light reflection),
+      softening to clear medium green, slightly deeper at base.
+      The gloss overlay adds the glass-surface shine.
+    -->
+    <linearGradient id="gtile" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#CCFFBC"/>
+      <stop offset="20%"  stop-color="#8ADC80"/>
+      <stop offset="58%"  stop-color="#54C24A"/>
+      <stop offset="100%" stop-color="#3AA034"/>
+    </linearGradient>
 
-    <!-- White tile: radial pillow/convex — pure white top, cool off-white body, blue-grey base -->
-    <radialGradient id="wtile" cx="50%" cy="20%" r="74%">
+    <!--
+      WHITE TILE: flat glass panel look.
+      Crisp white at top, fading to soft periwinkle-blue at base
+      (like looking through the back of a frosted glass tile).
+    -->
+    <linearGradient id="wtile" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%"   stop-color="#FFFFFF"/>
-      <stop offset="28%"  stop-color="#F4F8FF"/>
-      <stop offset="68%"  stop-color="#E2ECFF"/>
-      <stop offset="100%" stop-color="#C8D8F2"/>
-    </radialGradient>
+      <stop offset="36%"  stop-color="#F4F8FF"/>
+      <stop offset="78%"  stop-color="#DDE8FF"/>
+      <stop offset="100%" stop-color="#CBD6F2"/>
+    </linearGradient>
 
-    <!-- Tile top gloss: bright specular band across the top of every tile -->
-    <linearGradient id="tgloss" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%"   stop-color="white" stop-opacity="0.72"/>
-      <stop offset="32%"  stop-color="white" stop-opacity="0.14"/>
+    <!-- Tile glass gloss: sharp bright band at top fading out — gives the flat glass look -->
+    <linearGradient id="tGloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.68"/>
+      <stop offset="38%"  stop-color="white" stop-opacity="0.10"/>
       <stop offset="100%" stop-color="white" stop-opacity="0"/>
     </linearGradient>
 
   </defs>
 
-  <!-- Drop shadow behind icon -->
-  <rect x="8" y="13" width="186" height="186" rx="48"
-        fill="rgba(70,20,160,0.42)"
+  <!-- Drop shadow -->
+  <rect x="8" y="13" width="186" height="186" rx="46"
+        fill="rgba(65,18,155,0.36)"
         filter="url(#shadow)"/>
 
-  <!-- ── Glass shell body ────────────────────────────────────────── -->
-  <rect width="200" height="200" rx="50" fill="url(#glass)"/>
-
-  <!-- Glass top specular -->
-  <rect width="200" height="200" rx="50" fill="url(#glassTopGlow)"/>
-
-  <!-- Bottom rim glow -->
-  <rect width="200" height="200" rx="50" fill="url(#rimGlow)"/>
-
-  <!-- Outer edge highlight ring -->
-  <rect x="1.5" y="1.5" width="197" height="197" rx="49.5"
-        fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="2"/>
+  <!-- ── Glass shell ─────────────────────────────────────────────── -->
+  <rect width="200" height="200" rx="48" fill="url(#glassBody)"/>
+  <!-- Top specular reflection -->
+  <rect width="200" height="200" rx="48" fill="url(#topSpec)"/>
+  <!-- Bottom pink-purple rim glow -->
+  <rect width="200" height="200" rx="48" fill="url(#rimGlow)"/>
+  <!-- Outer edge white highlight ring -->
+  <rect x="1.5" y="1.5" width="197" height="197" rx="47.5"
+        fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="2"/>
 
   <!-- ── Inner floor ─────────────────────────────────────────────── -->
-  <!-- inset 24px each side → 152×152 at (24,24), rx=30 -->
-  <rect x="24" y="24" width="152" height="152" rx="30" fill="url(#floor)"/>
+  <rect x="24" y="24" width="152" height="152" rx="26" fill="url(#floor)"/>
+  <!-- Depth shadow at inner bezel edge -->
+  <rect x="24" y="24" width="152" height="152" rx="26" fill="url(#depthRing)"/>
 
-  <!-- Inner-edge depth shadow (glass thickness illusion) -->
-  <rect x="24" y="24" width="152" height="152" rx="30" fill="url(#depthRing)"/>
-
-  <!-- ── Tiles ───────────────────────────────────────────────────── -->
-  <!--
-    Layout: tile size 42×42, gap 7px between tiles, 6px from inner floor edge
-    x/y positions: 30, 79 (30+42+7), 128 (79+42+7)
-    inner floor right edge = 176; tile right edge = 128+42 = 170; padding = 6  ✓
-  -->
-
+  <!-- ── Tiles: 42×42px, gap 7px, positions 30 / 79 / 128 ──────── -->
   <!-- Row 1: G  W  G -->
-  <rect x="30"  y="30"  width="42" height="42" rx="10" fill="url(#gtile)"/>
-  <rect x="79"  y="30"  width="42" height="42" rx="10" fill="url(#wtile)"/>
-  <rect x="128" y="30"  width="42" height="42" rx="10" fill="url(#gtile)"/>
-
+  <rect x="30"  y="30"  width="42" height="42" rx="9" fill="url(#gtile)"/>
+  <rect x="79"  y="30"  width="42" height="42" rx="9" fill="url(#wtile)"/>
+  <rect x="128" y="30"  width="42" height="42" rx="9" fill="url(#gtile)"/>
   <!-- Row 2: W  G  W -->
-  <rect x="30"  y="79"  width="42" height="42" rx="10" fill="url(#wtile)"/>
-  <rect x="79"  y="79"  width="42" height="42" rx="10" fill="url(#gtile)"/>
-  <rect x="128" y="79"  width="42" height="42" rx="10" fill="url(#wtile)"/>
-
+  <rect x="30"  y="79"  width="42" height="42" rx="9" fill="url(#wtile)"/>
+  <rect x="79"  y="79"  width="42" height="42" rx="9" fill="url(#gtile)"/>
+  <rect x="128" y="79"  width="42" height="42" rx="9" fill="url(#wtile)"/>
   <!-- Row 3: G  W  G -->
-  <rect x="30"  y="128" width="42" height="42" rx="10" fill="url(#gtile)"/>
-  <rect x="79"  y="128" width="42" height="42" rx="10" fill="url(#wtile)"/>
-  <rect x="128" y="128" width="42" height="42" rx="10" fill="url(#gtile)"/>
+  <rect x="30"  y="128" width="42" height="42" rx="9" fill="url(#gtile)"/>
+  <rect x="79"  y="128" width="42" height="42" rx="9" fill="url(#wtile)"/>
+  <rect x="128" y="128" width="42" height="42" rx="9" fill="url(#gtile)"/>
 
-  <!-- Tile top-gloss overlay on all 9 tiles -->
-  <rect x="30"  y="30"  width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="79"  y="30"  width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="128" y="30"  width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="30"  y="79"  width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="79"  y="79"  width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="128" y="79"  width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="30"  y="128" width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="79"  y="128" width="42" height="42" rx="10" fill="url(#tgloss)"/>
-  <rect x="128" y="128" width="42" height="42" rx="10" fill="url(#tgloss)"/>
+  <!-- Tile glass gloss overlay on all 9 tiles -->
+  <rect x="30"  y="30"  width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="79"  y="30"  width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="128" y="30"  width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="30"  y="79"  width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="79"  y="79"  width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="128" y="79"  width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="30"  y="128" width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="79"  y="128" width="42" height="42" rx="9" fill="url(#tGloss)"/>
+  <rect x="128" y="128" width="42" height="42" rx="9" fill="url(#tGloss)"/>
 
-  <!-- Inner glass-edge bright arc (thin highlight just inside the top bezel edge) -->
-  <ellipse cx="100" cy="25" rx="54" ry="7" fill="rgba(255,255,255,0.30)"/>
+  <!-- Thin bright arc where inner glass edge meets floor at the top -->
+  <ellipse cx="100" cy="25" rx="52" ry="7" fill="rgba(255,255,255,0.26)"/>
 
 </svg>
