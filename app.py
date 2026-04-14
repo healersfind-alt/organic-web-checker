@@ -875,9 +875,16 @@ GLOBAL_CSS = """
 
   /* ── Mobile ──────────────────────────────────────────────────────────── */
   @media (max-width: 768px) {
-    header { padding: 12px 18px; }
+    header { padding: 10px 16px; gap: 8px; }
     .header-nav { display: none; }
+    .header-wordmark { font-size: .88rem; }
+    .header-logo-icon { width: 36px; height: 36px; }
+    .header-icon { width: 36px; height: 36px; }
+    .header-cta-btn { padding: 8px 14px; font-size: .8rem; }
+    .nav-user-email { font-size: .75rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .site-footer-inner { grid-template-columns: 1fr; gap: 28px; }
+    .page-main { padding: 0 16px; margin-top: 24px; }
+    .card { padding: 18px 16px; }
   }
 
   /* ── Auth modal ──────────────────────────────────────────────────────── */
@@ -1046,7 +1053,7 @@ document.addEventListener('click',()=>{const d=document.getElementById('hDd');if
       <input type="email" id="siEmail" placeholder="you@example.com" style="width:100%;box-sizing:border-box;margin-bottom:10px">
       <label>Password</label>
       <input type="password" id="siPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doLogin()">
-      <button onclick="doLogin()" class="gate-btn-primary" style="width:100%">Sign In</button>
+      <button onclick="doLogin()" class="btn-glass">Sign In</button>
     </div>
     <div id="authFormRegister" style="display:none">
       <label>Email</label>
@@ -1055,7 +1062,7 @@ document.addEventListener('click',()=>{const d=document.getElementById('hDd');if
       <input type="password" id="rgPw" placeholder="At least 8 characters" style="width:100%;box-sizing:border-box;margin-bottom:10px">
       <label>Confirm password</label>
       <input type="password" id="rgPw2" placeholder="Repeat password" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doRegister()">
-      <button onclick="doRegister()" class="gate-btn-primary" style="width:100%">Create Account</button>
+      <button onclick="doRegister()" class="btn-glass">Create Account</button>
     </div>
   </div>
 </div>
@@ -1558,19 +1565,82 @@ MAIN_HTML = """<!DOCTYPE html>
   .run-check-inner   { max-width: 640px; margin: 0 auto; padding: 0 24px; }
 
   /* Mobile */
+  /* ── Glass button (matches icon aesthetic) ───────────────────────────── */
+  .btn-glass {
+    background: linear-gradient(160deg, #F4EEFF 0%, #D8C4F8 42%, #B898EC 100%);
+    color: #4A1D96;
+    border: 1.5px solid rgba(144,96,216,0.30);
+    border-radius: 12px;
+    padding: 12px 28px;
+    font-size: .9rem; font-weight: 700;
+    cursor: pointer; width: 100%;
+    box-shadow: 0 2px 14px rgba(120,70,220,0.20),
+                inset 0 1px 0 rgba(255,255,255,0.72);
+    transition: transform .15s, box-shadow .15s, background .15s;
+    text-decoration: none; display: block; text-align: center;
+    letter-spacing: -.01em;
+  }
+  .btn-glass:hover {
+    background: linear-gradient(160deg, #EDE5FF 0%, #CCB6F6 42%, #A888E0 100%);
+    box-shadow: 0 4px 22px rgba(120,70,220,0.32),
+                inset 0 1px 0 rgba(255,255,255,0.65);
+    transform: translateY(-1px);
+  }
+  .btn-glass:active { transform: translateY(0); }
+
+  /* ── Mobile (landing page) ───────────────────────────────────────────── */
   @media (max-width: 768px) {
-    .hero-inner   { grid-template-columns: 1fr; gap: 36px; }
+    .hero-inner   { grid-template-columns: 1fr; gap: 32px; padding: 0 20px; }
     .hero-h1      { font-size: 2rem; }
     .hero-right   { display: none; }
-    .sample-inner { grid-template-columns: 1fr; gap: 32px; }
-    .ai-inner     { grid-template-columns: 1fr; gap: 32px; }
-    .hiw-steps    { grid-template-columns: 1fr; }
-    .hero-section, .features-section, .hiw-section, .sample-section, .ai-section, .run-check-section { padding: 48px 0; }
-    .trust-bar-label { margin-right: 0; margin-bottom: 10px; width: 100%; text-align: center; }
+    .hero-section { padding: 48px 0 40px; }
+    .hero-sub     { font-size: .96rem; max-width: 100%; }
+    .hero-ctas    { flex-direction: column; }
+    .hero-btn-primary, .hero-btn-secondary { text-align: center; }
+
+    .trust-bar-inner { flex-direction: column; align-items: flex-start; gap: 12px; padding: 0 20px; }
+    .trust-bar-label { margin-right: 0; }
+    .trust-bar-items { gap: 12px; }
+
+    .features-section, .hiw-section, .sample-section,
+    .ai-section, .run-check-section { padding: 48px 0; }
+    .features-grid { grid-template-columns: 1fr; gap: 14px; }
+    .feature-card  { padding: 20px 18px; }
+
+    .hiw-inner  { padding: 0 20px; }
+    .hiw-steps  { grid-template-columns: 1fr; gap: 0; }
+    .hiw-step   { padding: 20px 0; border-bottom: 1px solid var(--border); }
+    .hiw-step:last-child { border-bottom: none; }
+
+    .sample-inner { grid-template-columns: 1fr; gap: 28px; padding: 0 20px; }
+    .sample-summary { grid-template-columns: repeat(3,1fr); }
+
+    .ai-inner  { grid-template-columns: 1fr; gap: 28px; padding: 0 20px; }
+    .ai-cards  { gap: 10px; }
+
+    .section-inner, .landing-wrap { padding: 0 20px; }
+    .section-h2 { font-size: 1.65rem; }
+
+    .run-check-inner { padding: 0 20px; }
+    .check-form-card { padding: 20px 16px; }
+
+    .queue-panel { margin: 0 0 16px; }
+    .meta-grid   { grid-template-columns: 1fr 1fr; }
+
+    .pricing-grid { grid-template-columns: 1fr; }
   }
+
   @media (max-width: 480px) {
-    .hero-h1    { font-size: 1.7rem; }
-    .section-h2 { font-size: 1.45rem; }
+    .hero-h1     { font-size: 1.75rem; }
+    .section-h2  { font-size: 1.4rem; }
+    .hero-eyebrow { font-size: .7rem; }
+    .sample-summary { grid-template-columns: 1fr 1fr 1fr; }
+    .trust-bar-items { flex-direction: column; gap: 8px; }
+    header { padding: 8px 14px; }
+    .header-wordmark { display: none; }
+    .nav-user-email  { max-width: 80px; }
+    .modal-card { padding: 24px 18px; }
+    .gate-teaser { grid-template-columns: repeat(2,1fr); }
   }
   </style>
 </head>
@@ -2086,7 +2156,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <input type="email" id="siEmail" placeholder="you@example.com" style="width:100%;box-sizing:border-box;margin-bottom:10px">
       <label>Password</label>
       <input type="password" id="siPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doLogin()">
-      <button onclick="doLogin()" class="gate-btn-primary" style="width:100%">Sign In</button>
+      <button onclick="doLogin()" class="btn-glass">Sign In</button>
     </div>
     <div id="authFormRegister" style="display:none">
       <label>Email</label>
@@ -2095,7 +2165,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <input type="password" id="rgPw" placeholder="At least 8 characters" style="width:100%;box-sizing:border-box;margin-bottom:10px">
       <label>Confirm password</label>
       <input type="password" id="rgPw2" placeholder="Repeat password" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doRegister()">
-      <button onclick="doRegister()" class="gate-btn-primary" style="width:100%">Create Account</button>
+      <button onclick="doRegister()" class="btn-glass">Create Account</button>
     </div>
   </div>
 </div>
