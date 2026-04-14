@@ -362,7 +362,12 @@ def get_oid_cert(operation_name: str) -> dict:
 
     # Parse the result row
     lines = [l.strip() for l in body_text.split('\n') if l.strip()]
-    result = {"operation": operation_name, "certifier": "", "status": "", "location": "", "products": []}
+    result = {
+        "operation": operation_name,
+        "certifier": "", "status": "", "location": "",
+        "scope": [],        # e.g. ['HANDLING'] or ['CROPS', 'LIVESTOCK']
+        "products": [],
+    }
 
     for i, line in enumerate(lines):
         if op_norm in _oid_norm(line):
@@ -383,8 +388,15 @@ def get_oid_cert(operation_name: str) -> dict:
             if loc_match:
                 result["location"] = f"{loc_match.group(1).strip()}, {loc_match.group(2).strip()}"
 
+            # Scope types — detect from section headers in product block
+            scope_found = re.findall(
+                r'\b(HANDLING|CROPS|LIVESTOCK|WILD\s*CROPS)\b',
+                block, re.IGNORECASE
+            )
+            result["scope"] = sorted(set(s.upper().replace(' ', '_') for s in scope_found))
+
             # Products — everything after "HANDLING:" or "CROPS:"
-            prod_match = re.search(r'(?:HANDLING|CROPS):.*?:(.*?)(?:\n\d|\Z)', block, re.DOTALL)
+            prod_match = re.search(r'(?:HANDLING|CROPS|LIVESTOCK):.*?:(.*?)(?:\n\d|\Z)', block, re.DOTALL)
             if prod_match:
                 raw_products = prod_match.group(1)
             else:
@@ -396,7 +408,7 @@ def get_oid_cert(operation_name: str) -> dict:
             items = []
             for item in re.split(r',\s*', raw_products):
                 item = item.strip().strip('.')
-                item = re.sub(r'^(HANDLING|CROPS|Butters?|Other):\s*', '', item, flags=re.IGNORECASE)
+                item = re.sub(r'^(HANDLING|CROPS|LIVESTOCK|Butters?|Other):\s*', '', item, flags=re.IGNORECASE)
                 item = re.sub(r'#.*', '', item).strip()  # remove notes like #Processing...
                 if item and len(item) > 2 and not item.startswith('1 '):
                     items.append(item)
@@ -483,6 +495,7 @@ def run_check(operation_name: str, website_url: str,
         "certifier":          cert["certifier"],
         "status":             cert["status"],
         "location":           cert["location"],
+        "scope":              cert.get("scope", []),
         "cert_product_count": len(cert["products"]),
         "cert_products":      cert["products"],
         "website_url":        website_url,

@@ -304,6 +304,7 @@ def report_to_markdown(report: dict) -> str:
         f"- **Certifier:** {report.get('certifier', '')}",
         f"- **Status:** {report.get('status', '')}",
         f"- **Location:** {report.get('location', '')}",
+        f"- **Cert Scope:** {', '.join(report.get('scope', [])) or 'Not detected'}",
         f"- **Website:** {report.get('website_url', '')}",
         f"- **OID Data:** {'Cached (' + report.get('oid_cached_at', '') + ') — verify live at organic.ams.usda.gov' if report.get('oid_source') == 'cached' else 'Live'}",
         "",
@@ -319,12 +320,32 @@ def report_to_markdown(report: dict) -> str:
         "",
     ]
 
+    # ── Handling scope notice ──────────────────────────────────────────────
+    if 'HANDLING' in report.get('scope', []):
+        lines += [
+            "## ⓘ HANDLING OPERATION SCOPE NOTICE",
+            "This operation is certified as a handler (broker, distributor, importer, or processor).",
+            "Handler certificates typically list products at a general category level; specific branded",
+            "products are documented in the Organic System Plan (OSP) held by the certifier.",
+            "Flagged items below require verification of upstream supplier certification in the OSP.",
+            "Ref: 7 CFR § 205.201 (OSP requirements); SOE Rule (eff. March 19, 2024)",
+            "",
+        ]
+
     # ── Non-compliance flags ───────────────────────────────────────────────
     if flagged:
+        if 'HANDLING' in report.get('scope', []):
+            flag_note = ("Products marketed as organic on the website but not found on this operation's "
+                         "OID certificate. For handling operations: verify upstream supplier certification "
+                         "in the Organic System Plan (OSP).")
+            flag_ref  = "Ref: 7 CFR § 205.307 (misrepresentation); § 205.201 (OSP supplier documentation); SOE Rule § 205.2"
+        else:
+            flag_note = "Products marketed as organic on the website but NOT found on the OID certificate."
+            flag_ref  = "Ref: 7 CFR § 205.307 (misrepresentation); § 205.303–305 (labeling requirements)"
         lines += [
             f"## 🔴 NON-COMPLIANCE RISK ({len(flagged)} items)",
-            "Products marketed as organic on the website but NOT found on the OID certificate.",
-            "Ref: 7 CFR § 205.307 (misrepresentation); § 205.303–305 (labeling requirements)",
+            flag_note,
+            flag_ref,
             "",
         ]
         for i, item in enumerate(flagged, 1):
@@ -1274,8 +1295,36 @@ REPORT_PARTIAL = """
     <div class="meta-item"><label>Certifier</label><span>{{ report.certifier }}</span></div>
     <div class="meta-item"><label>Status</label><span>{{ report.status }}</span></div>
     <div class="meta-item"><label>Location</label><span>{{ report.location }}</span></div>
-    <div class="meta-item" style="grid-column:span 2"><label>Website</label><span><a href="{{ report.website_url }}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(0,229,204,.3)">{{ report.website_url }}</a></span></div>
+    <div class="meta-item"><label>Cert Scope</label><span>
+      {% if report.get('scope') %}
+        {% for s in report.scope %}
+          <span style="display:inline-block;font-size:.68rem;padding:2px 8px;border-radius:6px;margin-right:4px;font-weight:700;
+            {% if s == 'HANDLING' %}background:#EEF2FF;color:var(--primary);border:1px solid rgba(91,61,246,.2)
+            {% elif s == 'CROPS' %}background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0
+            {% elif s == 'LIVESTOCK' %}background:#FFF7ED;color:#D97706;border:1px solid #FED7AA
+            {% else %}background:#F8FAFC;color:var(--muted);border:1px solid var(--border){% endif %}">{{ s }}</span>
+        {% endfor %}
+      {% else %}<span style="color:var(--muted);font-size:.78rem">Not detected</span>{% endif %}
+    </span></div>
+    <div class="meta-item"><label>Website</label><span><a href="{{ report.website_url }}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(0,229,204,.3)">{{ report.website_url }}</a></span></div>
   </div>
+
+  {# ── Handling scope notice ─────────────────────────────────────── #}
+  {% if 'HANDLING' in (report.get('scope') or []) %}
+  <div style="margin-bottom:18px;padding:12px 16px;border-radius:10px;background:#EEF2FF;border:1px solid rgba(91,61,246,.18);font-size:.78rem;line-height:1.6;color:var(--text)">
+    <strong style="color:var(--primary)">&#9432; Handling Operation Scope Notice</strong><br>
+    This operation is certified as a <strong>handler</strong> (broker, distributor, importer, or processor).
+    Handler certificates typically list products at a general category level (e.g., &ldquo;Organic Eggs&rdquo;).
+    Specific branded or SKU-level products are documented in the operation&rsquo;s <strong>Organic System Plan (OSP)</strong>
+    held by their certifier &mdash; not publicly visible in OID.<br>
+    <span style="color:var(--muted);font-size:.72rem">
+      Flagged items below indicate products not found on this operation&rsquo;s OID certificate.
+      For handling operations, the compliance question is whether each product is covered by a documented
+      upstream supplier certification in the OSP.
+      Ref: 7 CFR &sect;&nbsp;205.201 (OSP requirements) &bull; SOE Rule (eff. March&nbsp;19,&nbsp;2024)
+    </span>
+  </div>
+  {% endif %}
 
   {# 6-box summary grid #}
   <div style="display:grid;grid-template-columns:repeat(3,1fr) repeat(3,1fr);gap:8px;margin-bottom:26px">
@@ -1312,8 +1361,15 @@ REPORT_PARTIAL = """
       <span class="badge">{{ report.flagged | length }}</span>
     </div>
     <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;line-height:1.55">
-      Specific products labeled <em>organic</em> on the website but <strong>NOT found on the current OID certificate</strong>.<br>
-      <span style="font-size:.7rem;opacity:.7">Ref: 7 CFR &sect;&nbsp;205.307 (misrepresentation &amp; fraud) &bull; &sect;&nbsp;205.303&ndash;305 (labeling)</span>
+      {% if 'HANDLING' in (report.get('scope') or []) %}
+        Specific products marketed as organic on the website but <strong>not found on this operation&rsquo;s OID certificate</strong>.
+        For handling operations, verify that each product is covered by an upstream supplier&rsquo;s certification
+        documented in the operation&rsquo;s Organic System Plan (OSP).<br>
+        <span style="font-size:.7rem;opacity:.7">Ref: 7 CFR &sect;&nbsp;205.307 (misrepresentation) &bull; &sect;&nbsp;205.201 (OSP supplier documentation) &bull; SOE Rule &sect;&nbsp;205.2 (handling scope)</span>
+      {% else %}
+        Specific products labeled <em>organic</em> on the website but <strong>NOT found on the current OID certificate</strong>.<br>
+        <span style="font-size:.7rem;opacity:.7">Ref: 7 CFR &sect;&nbsp;205.307 (misrepresentation &amp; fraud) &bull; &sect;&nbsp;205.303&ndash;305 (labeling)</span>
+      {% endif %}
     </p>
     <ul class="product-list">
       {% for item in report.flagged | sort(attribute='title') %}
