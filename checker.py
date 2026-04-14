@@ -334,10 +334,10 @@ def get_oid_cert(operation_name: str) -> dict:
 
         page.goto(
             "https://organic.ams.usda.gov/integrity/",
-            wait_until="load",
-            timeout=60000
+            wait_until="domcontentloaded",
+            timeout=90000
         )
-        time.sleep(8)
+        time.sleep(10)
 
         # Type into the operation name field
         op_input = page.locator("#operation")

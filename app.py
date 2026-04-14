@@ -236,6 +236,11 @@ def _run_job(job_id: str, operation: str, website: str, use_cache: bool = False)
                     oid_source    = 'cached'
                     oid_cached_at = cached['cached_at']
                     _progress(2, f"OID data loaded from cache ({oid_cached_at})")
+                else:
+                    raise ValueError(
+                        f"No cached OID data found for '{operation}'. "
+                        "Uncheck 'Use cached OID data' and run a live check first to build the cache."
+                    )
 
             # ── Live OID fetch (with auto-fallback to cache on timeout) ────────
             if cert is None:
