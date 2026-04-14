@@ -26,11 +26,12 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-in-prod')
 stripe.api_key         = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PK              = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_WH_SECRET       = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+# If DATABASE_PUBLIC_URL is set, always prefer it — Railway's internal
+# postgres.railway.internal hostname only resolves with private networking,
+# which is not enabled on the hobby plan.  PUBLIC URL works from anywhere.
 _db_url     = os.environ.get('DATABASE_URL', '')
 _db_pub_url = os.environ.get('DATABASE_PUBLIC_URL', '')
-# Railway internal hostname only works with private networking enabled.
-# Fall back to public proxy URL automatically.
-DATABASE_URL = _db_pub_url if ('.railway.internal' in _db_url and _db_pub_url) else _db_url
+DATABASE_URL = _db_pub_url or _db_url
 APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebchecker.com')
 
 # ---------------------------------------------------------------------------
@@ -323,7 +324,7 @@ GLOBAL_CSS = """
     border-bottom: 1px solid var(--border);
     box-shadow: 0 1px 12px rgba(15,23,42,.06);
     padding: 14px 32px;
-    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px;
     position: sticky; top: 0; z-index: 100;
   }
   .header-logo {
@@ -334,8 +335,8 @@ GLOBAL_CSS = """
   header h1 { font-size: 1rem; font-weight: 800; color: var(--primary); }
   header p  { font-size: .78rem; color: var(--muted); margin-top: 2px; }
 
-  .header-right { display: flex; align-items: center; gap: 10px; }
-  .header-nav   { display: flex; gap: 2px; }
+  .header-right { display: flex; align-items: center; gap: 10px; justify-self: end; }
+  .header-nav   { display: flex; gap: 2px; justify-content: center; }
   .nav-link {
     color: var(--muted); font-size: .82rem; text-decoration: none;
     padding: 6px 12px; border-radius: 8px;
@@ -875,7 +876,7 @@ GLOBAL_CSS = """
 
   /* ── Mobile ──────────────────────────────────────────────────────────── */
   @media (max-width: 768px) {
-    header { padding: 10px 16px; gap: 8px; }
+    header { padding: 10px 16px; gap: 8px; grid-template-columns: 1fr auto; }
     .header-nav { display: none; }
     .header-wordmark { font-size: .88rem; }
     .header-logo-icon { width: 36px; height: 36px; }
@@ -969,6 +970,29 @@ GLOBAL_CSS = """
   }
   .gate-meta-block strong { color: var(--text); }
   .gate-meta-block span   { color: var(--muted); }
+
+  /* ── Glass button (matches icon aesthetic) — global ─────────────────── */
+  .btn-glass {
+    background: linear-gradient(160deg, #F4EEFF 0%, #D8C4F8 42%, #B898EC 100%);
+    color: #4A1D96;
+    border: 1.5px solid rgba(144,96,216,0.30);
+    border-radius: 12px;
+    padding: 12px 28px;
+    font-size: .9rem; font-weight: 700;
+    cursor: pointer; width: 100%;
+    box-shadow: 0 2px 14px rgba(120,70,220,0.20),
+                inset 0 1px 0 rgba(255,255,255,0.72);
+    transition: transform .15s, box-shadow .15s, background .15s;
+    text-decoration: none; display: block; text-align: center;
+    letter-spacing: -.01em;
+  }
+  .btn-glass:hover {
+    background: linear-gradient(160deg, #EDE5FF 0%, #CCB6F6 42%, #A888E0 100%);
+    box-shadow: 0 4px 22px rgba(120,70,220,0.32),
+                inset 0 1px 0 rgba(255,255,255,0.65);
+    transform: translateY(-1px);
+  }
+  .btn-glass:active { transform: translateY(0); }
 """
 
 
@@ -994,21 +1018,19 @@ BASE_TEMPLATE = """<!DOCTYPE html>
     <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
     <span class="header-wordmark">Organic Web Checker</span>
   </a>
+  <nav class="header-nav">
+    <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Product</a>
+    <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">How It Works</a>
+    <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
+    <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
+    <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">API</a>
+  </nav>
   <div class="header-right">
-    <nav class="header-nav">
-      <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Product</a>
-      <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">How It Works</a>
-      <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
-      <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
-      <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">API</a>
-    </nav>
     <div id="navUserArea">
       {% if user_email %}
         <span class="nav-user-email">{{ user_email }}</span>
         {% if user_is_admin %}<span style="font-size:.75rem;color:var(--muted)">Admin</span>{% else %}<span style="font-size:.75rem;color:var(--muted)">{{ user_credits }} credit{{ 's' if user_credits != 1 else '' }}</span>{% endif %}
         <button class="nav-signout" onclick="doLogout()">Sign Out</button>
-      {% else %}
-        <a href="#" class="nav-link" onclick="openAuthModal('signin');return false;">Sign In</a>
       {% endif %}
     </div>
     <a href="/#run-check" class="header-cta-btn">Run a Check</a>
@@ -1112,7 +1134,7 @@ function updateAuthUI(email,credits){
     const credTxt=credits>=99999?'Admin':(credits+' credit'+(credits!==1?'s':''));
     el.innerHTML='<span class="nav-user-email">'+email+'</span>&nbsp;<span style="font-size:.75rem;color:var(--muted)">'+credTxt+'</span>&nbsp;<button class="nav-signout" onclick="doLogout()">Sign Out</button>';
   }else{
-    el.innerHTML='<a href="#" class="nav-link" onclick="openAuthModal(\'signin\');return false;">Sign In</a>';
+    el.innerHTML='';
   }
 }
 </script>
@@ -1564,30 +1586,6 @@ MAIN_HTML = """<!DOCTYPE html>
   .run-check-section { padding: 72px 0; background: var(--bg); }
   .run-check-inner   { max-width: 640px; margin: 0 auto; padding: 0 24px; }
 
-  /* Mobile */
-  /* ── Glass button (matches icon aesthetic) ───────────────────────────── */
-  .btn-glass {
-    background: linear-gradient(160deg, #F4EEFF 0%, #D8C4F8 42%, #B898EC 100%);
-    color: #4A1D96;
-    border: 1.5px solid rgba(144,96,216,0.30);
-    border-radius: 12px;
-    padding: 12px 28px;
-    font-size: .9rem; font-weight: 700;
-    cursor: pointer; width: 100%;
-    box-shadow: 0 2px 14px rgba(120,70,220,0.20),
-                inset 0 1px 0 rgba(255,255,255,0.72);
-    transition: transform .15s, box-shadow .15s, background .15s;
-    text-decoration: none; display: block; text-align: center;
-    letter-spacing: -.01em;
-  }
-  .btn-glass:hover {
-    background: linear-gradient(160deg, #EDE5FF 0%, #CCB6F6 42%, #A888E0 100%);
-    box-shadow: 0 4px 22px rgba(120,70,220,0.32),
-                inset 0 1px 0 rgba(255,255,255,0.65);
-    transform: translateY(-1px);
-  }
-  .btn-glass:active { transform: translateY(0); }
-
   /* ── Mobile (landing page) ───────────────────────────────────────────── */
   @media (max-width: 768px) {
     .hero-inner   { grid-template-columns: 1fr; gap: 32px; padding: 0 20px; }
@@ -1651,21 +1649,19 @@ MAIN_HTML = """<!DOCTYPE html>
     <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
     <span class="header-wordmark">Organic Web Checker</span>
   </a>
+  <nav class="header-nav">
+    <a href="/"        class="nav-link active">Product</a>
+    <a href="/about"   class="nav-link">How It Works</a>
+    <a href="/pricing" class="nav-link">Pricing</a>
+    <a href="/history" class="nav-link">History</a>
+    <a href="/agents"  class="nav-link">API</a>
+  </nav>
   <div class="header-right">
-    <nav class="header-nav">
-      <a href="/"        class="nav-link active">Product</a>
-      <a href="/about"   class="nav-link">How It Works</a>
-      <a href="/pricing" class="nav-link">Pricing</a>
-      <a href="/history" class="nav-link">History</a>
-      <a href="/agents"  class="nav-link">API</a>
-    </nav>
     <div id="navUserArea">
       {% if user_email %}
         <span class="nav-user-email">{{ user_email }}</span>
         {% if user_is_admin %}<span style="font-size:.75rem;color:var(--muted)">Admin</span>{% else %}<span style="font-size:.75rem;color:var(--muted)">{{ user_credits }} credit{{ 's' if user_credits != 1 else '' }}</span>{% endif %}
         <button class="nav-signout" onclick="doLogout()">Sign Out</button>
-      {% else %}
-        <a href="#" class="nav-link" onclick="openAuthModal('signin');return false;">Sign In</a>
       {% endif %}
     </div>
     <a href="#run-check" class="header-cta-btn">Run a Check</a>
@@ -2215,7 +2211,7 @@ function updateAuthUI(email,credits){
     const credTxt=credits>=99999?'Admin':(credits+' credit'+(credits!==1?'s':''));
     el.innerHTML='<span class="nav-user-email">'+email+'</span>&nbsp;<span style="font-size:.75rem;color:var(--muted)">'+credTxt+'</span>&nbsp;<button class="nav-signout" onclick="doLogout()">Sign Out</button>';
   }else{
-    el.innerHTML='<a href="#" class="nav-link" onclick="openAuthModal(\'signin\');return false;">Sign In</a>';
+    el.innerHTML='';
   }
 }
 </script>
@@ -2327,7 +2323,7 @@ ACCOUNT_BODY = """
         <input type="email" id="acctSiEmail" placeholder="you@example.com">
         <label style="margin-top:10px">Password</label>
         <input type="password" id="acctSiPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onkeydown="if(event.key==='Enter')acctDoLogin()">
-        <button onclick="acctDoLogin()" style="width:100%;margin-top:14px">Sign In</button>
+        <button onclick="acctDoLogin()" class="btn-glass" style="width:100%;margin-top:14px">Sign In</button>
       </div>
       <div id="acctFormRegister" style="display:none">
         <label>Email</label>
@@ -2336,7 +2332,7 @@ ACCOUNT_BODY = """
         <input type="password" id="acctRgPw" placeholder="At least 8 characters">
         <label style="margin-top:10px">Confirm password</label>
         <input type="password" id="acctRgPw2" placeholder="Repeat password" onkeydown="if(event.key==='Enter')acctDoRegister()">
-        <button onclick="acctDoRegister()" style="width:100%;margin-top:14px">Create Account</button>
+        <button onclick="acctDoRegister()" class="btn-glass" style="width:100%;margin-top:14px">Create Account</button>
       </div>
     </div>
   </div>
@@ -2776,6 +2772,27 @@ def api_init_db():
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
+@app.route('/api/health')
+def health():
+    """Public health check — tests DB connectivity without exposing secrets."""
+    db_ok  = False
+    db_err = None
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('SELECT 1')
+            db_ok = True
+        except Exception as e:
+            db_err = str(e)
+    return jsonify({
+        'db_url_set':  bool(DATABASE_URL),
+        'db_ok':       db_ok,
+        'db_error':    db_err,
+        'using_public_url': bool(_db_pub_url and DATABASE_URL == _db_pub_url),
+    })
+
+
 @app.route('/api/config-check')
 def config_check():
     """Admin-only diagnostic — shows whether env vars are loaded (not their values)."""
@@ -2786,6 +2803,7 @@ def config_check():
         'stripe_key_prefix':   stripe.api_key[:7] if stripe.api_key else '(empty)',
         'stripe_wh_loaded':    bool(STRIPE_WH_SECRET),
         'db_loaded':           bool(DATABASE_URL),
+        'using_public_url':    bool(_db_pub_url and DATABASE_URL == _db_pub_url),
         'app_base_url':        APP_BASE_URL,
     })
 

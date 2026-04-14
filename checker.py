@@ -32,6 +32,12 @@ MARKETING_RE = re.compile(
     r'|(?:natural|clean|sustainable)\s+(?:&|and)\s+organic'
     r'|organic\s+(?:meat|poultry|dairy|eggs?)(?!\s+\w+\s+\w+)'   # generic category names
     r'|organic\s+(?:farm|farming|grower|grown)'
+    # Operation/facility-level organic claims (e.g. "certified organic brewery")
+    r'|certified\s+organic\s+(?:craft\s+)?(?:brewery|winery|distillery|creamery|bakery|farm|operation|producer|facility|company)'
+    r'|(?:craft\s+)?organic\s+(?:brewery|winery|distillery|creamery|bakery)'
+    r'|all[\s\-]organic\s+(?:beers?|wines?|spirits?|products?|ingredients?|menu)'
+    r'|line\s+of\s+(?:all\s+)?organic\s+(?:beers?|wines?|spirits?)'
+    r'|organic\s+craft\s+(?:beer|wine|spirits?|brew)'
     r')\b',
     re.IGNORECASE
 )
@@ -250,6 +256,9 @@ def scrape_generic(base_url: str) -> list[dict]:
         '.wc-block-grid__product-title',
         # BigCommerce
         '.productGrid .card-title', '[data-product-title]',
+        # Squarespace Commerce
+        '.ProductItem-details-title', '.ProductItem-title',
+        '.summary-title', '[data-automation="product-title"]',
         # Generic
         '[class*="product"][class*="title"]',
         '[class*="product"][class*="name"]',
@@ -277,12 +286,6 @@ def scrape_generic(base_url: str) -> list[dict]:
         except Exception:
             pass
 
-    # Second fallback: meta product titles in page source
-    for meta in soup.find_all('meta', {'property': 'og:title'}):
-        content = meta.get('content', '')
-        if content and ORGANIC_RE.search(content) and content not in found:
-            found[content] = ""
-
     return [{"title": t, "url": u} for t, u in found.items()]
 
 
@@ -297,7 +300,10 @@ def get_organic_products(website_url: str) -> list[dict]:
     if len(all_products) < 3:
         all_products = scrape_generic(website_url)
 
-    return [p for p in all_products if ORGANIC_RE.search(p['title'])]
+    return [
+        p for p in all_products
+        if ORGANIC_RE.search(p['title']) and len(p['title']) <= 150
+    ]
 
 
 # ---------------------------------------------------------------------------
