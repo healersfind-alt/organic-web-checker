@@ -411,9 +411,12 @@ def get_oid_cert(operation_name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def run_check(operation_name: str, website_url: str,
+              cert: dict = None,
               progress_callback=None) -> dict:
     """
     Full check: scrape website + OID, compare, return structured report.
+
+    Pass cert= to skip the live OID fetch (e.g. when using cached data).
 
     Categories (ref: 7 CFR Part 205 — USDA NOP):
       flagged   🔴 Not on OID cert — potential non-compliance (§ 205.307)
@@ -425,9 +428,14 @@ def run_check(operation_name: str, website_url: str,
         if progress_callback:
             progress_callback(step, msg)
 
-    _p(1, f"Connecting to USDA Organic Integrity Database…")
-    print(f"[1/4] Pulling OID certificate for '{operation_name}'…")
-    cert = get_oid_cert(operation_name)
+    if cert is None:
+        _p(1, f"Connecting to USDA Organic Integrity Database…")
+        print(f"[1/4] Pulling OID certificate for '{operation_name}'…")
+        cert = get_oid_cert(operation_name)
+    else:
+        _p(1, f"OID certificate loaded")
+        print(f"[1/4] Using pre-loaded OID certificate for '{operation_name}'…")
+
     if "error" in cert:
         return cert
 

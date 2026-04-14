@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from flask import Flask, request, render_template_string, send_from_directory, jsonify, Response, session
 from werkzeug.security import generate_password_hash, check_password_hash
-from checker import run_check
+from checker import run_check, get_oid_cert, _clean_oid_search
 import stripe
 import psycopg2
 
@@ -83,12 +83,71 @@ def init_db():
                     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS oid_cache (
+                    cache_key  TEXT PRIMARY KEY,
+                    operation  TEXT NOT NULL,
+                    cert_data  JSONB NOT NULL,
+                    cached_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
         conn.commit()
 
 try:
     init_db()
 except Exception as _db_err:
     print(f'[WARN] DB init skipped: {_db_err}')
+
+
+# ---------------------------------------------------------------------------
+# OID cert cache helpers (Postgres, 24-hour TTL)
+# ---------------------------------------------------------------------------
+
+def _oid_cache_key(name: str) -> str:
+    return _clean_oid_search(name).lower().strip()
+
+
+def get_cached_oid(operation_name: str):
+    """Return {'cert': dict, 'cached_at': str} if a fresh cache entry exists, else None."""
+    if not DATABASE_URL:
+        return None
+    key = _oid_cache_key(operation_name)
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT cert_data, cached_at FROM oid_cache "
+                    "WHERE cache_key = %s AND cached_at > NOW() - INTERVAL '24 hours'",
+                    (key,)
+                )
+                row = cur.fetchone()
+        if row:
+            return {'cert': row[0], 'cached_at': row[1].strftime('%Y-%m-%d %H:%M UTC')}
+    except Exception as e:
+        print(f'[WARN] oid_cache read failed: {e}')
+    return None
+
+
+def save_oid_cache(operation_name: str, cert: dict):
+    """Upsert cert data into oid_cache."""
+    if not DATABASE_URL:
+        return
+    key = _oid_cache_key(operation_name)
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO oid_cache (cache_key, operation, cert_data, cached_at)
+                       VALUES (%s, %s, %s::jsonb, NOW())
+                       ON CONFLICT (cache_key) DO UPDATE SET
+                           cert_data = EXCLUDED.cert_data,
+                           cached_at = NOW()""",
+                    (key, operation_name, json.dumps(cert))
+                )
+            conn.commit()
+    except Exception as e:
+        print(f'[WARN] oid_cache save failed: {e}')
+
 
 def get_session_token():
     if 'token' not in session:
@@ -153,7 +212,7 @@ _check_semaphore = threading.Semaphore(1)
 stats = {'checks_run': 0, 'flags_found': 0, 'caution_found': 0}
 
 
-def _run_job(job_id: str, operation: str, website: str):
+def _run_job(job_id: str, operation: str, website: str, use_cache: bool = False):
     def _progress(step: int, msg: str):
         with jobs_lock:
             jobs[job_id]['step'] = step
@@ -165,15 +224,49 @@ def _run_job(job_id: str, operation: str, website: str):
             jobs[job_id]['step'] = 1
             jobs[job_id]['step_msg'] = 'Connecting to USDA Organic Integrity Database…'
         try:
-            report = run_check(operation, website, progress_callback=_progress)
+            cert          = None
+            oid_source    = 'live'
+            oid_cached_at = None
+
+            # ── Cache-first: user opted to skip live OID ──────────────────────
+            if use_cache:
+                cached = get_cached_oid(operation)
+                if cached:
+                    cert          = cached['cert']
+                    oid_source    = 'cached'
+                    oid_cached_at = cached['cached_at']
+                    _progress(2, f"OID data loaded from cache ({oid_cached_at})")
+
+            # ── Live OID fetch (with auto-fallback to cache on timeout) ────────
+            if cert is None:
+                try:
+                    cert = get_oid_cert(operation)
+                    if 'error' not in cert:
+                        save_oid_cache(operation, cert)
+                except Exception as oid_err:
+                    if 'timeout' in str(oid_err).lower():
+                        fallback = get_cached_oid(operation)
+                        if fallback:
+                            cert          = fallback['cert']
+                            oid_source    = 'cached'
+                            oid_cached_at = fallback['cached_at']
+                            _progress(2, f"OID timed out — using cached data from {oid_cached_at}")
+                        else:
+                            raise
+                    else:
+                        raise
+
+            report = run_check(operation, website, cert=cert, progress_callback=_progress)
+            report['oid_source']    = oid_source
+            report['oid_cached_at'] = oid_cached_at
+
             with jobs_lock:
                 jobs[job_id]['status'] = 'done'
                 jobs[job_id]['report'] = report
-            # Update session stats
             if 'error' not in report:
                 with jobs_lock:
                     stats['checks_run'] += 1
-                    stats['flags_found'] += len(report.get('flagged', []))
+                    stats['flags_found']   += len(report.get('flagged', []))
                     stats['caution_found'] += len(report.get('caution', []))
         except Exception as e:
             with jobs_lock:
@@ -207,6 +300,7 @@ def report_to_markdown(report: dict) -> str:
         f"- **Status:** {report.get('status', '')}",
         f"- **Location:** {report.get('location', '')}",
         f"- **Website:** {report.get('website_url', '')}",
+        f"- **OID Data:** {'Cached (' + report.get('oid_cached_at', '') + ') — verify live at organic.ams.usda.gov' if report.get('oid_source') == 'cached' else 'Live'}",
         "",
         "## Summary",
         "| Category | Count | Severity |",
@@ -1155,6 +1249,14 @@ REPORT_PARTIAL = """
     <div>
       <div class="report-op-name">{{ report.operation }}</div>
       <div class="report-meta-sub">{{ report.certifier }} &middot; {{ report.status }} &middot; {{ report.location }}</div>
+    <div style="margin-top:6px">
+      {% if report.get('oid_source') == 'cached' %}
+        <span style="font-size:.68rem;padding:2px 9px;border-radius:8px;background:#FEF3C7;color:#D97706;border:1px solid #FDE68A;font-weight:700">&#128190; Cached OID &middot; {{ report.oid_cached_at }}</span>
+        <span style="font-size:.68rem;color:var(--muted);margin-left:8px">Verify live at organic.ams.usda.gov</span>
+      {% else %}
+        <span style="font-size:.68rem;padding:2px 9px;border-radius:8px;background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;font-weight:700">&#10003; Live OID data</span>
+      {% endif %}
+    </div>
     </div>
     <div class="download-btns">
       <a class="dl-btn md"  href="/job/{{ job_id }}/download/md"  target="_blank">&#8595; .md</a>
@@ -1939,6 +2041,10 @@ MAIN_HTML = """<!DOCTYPE html>
                placeholder="e.g. https://greenridgeorganics.com"
                value="{{ prefill_url or '' }}" required>
         <div class="hint">Supports Shopify, WooCommerce, BigCommerce, and most product websites</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer;font-size:.82rem;text-transform:none;letter-spacing:0;color:var(--muted);font-weight:500">
+          <input type="checkbox" name="use_cache" value="1" style="width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0">
+          Use cached OID data if available &mdash; skips live lookup (same cost, ~5s vs ~60s)
+        </label>
         <button type="submit" id="submitBtn">Run Check</button>
       </form>
     </div>
@@ -2548,6 +2654,7 @@ def index():
 def check():
     operation = request.form.get('operation', '').strip()
     website   = request.form.get('website', '').strip()
+    use_cache = request.form.get('use_cache') == '1'
     if not website.startswith('http'):
         website = 'https://' + website
 
@@ -2561,7 +2668,7 @@ def check():
             'unlocked': False,
         }
 
-    thread = threading.Thread(target=_run_job, args=(job_id, operation, website), daemon=True)
+    thread = threading.Thread(target=_run_job, args=(job_id, operation, website, use_cache), daemon=True)
     thread.start()
     return jsonify({'job_id': job_id})
 
