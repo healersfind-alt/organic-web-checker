@@ -2803,7 +2803,6 @@ def config_check():
         'stripe_key_prefix':   stripe.api_key[:7] if stripe.api_key else '(empty)',
         'stripe_wh_loaded':    bool(STRIPE_WH_SECRET),
         'stripe_wh_prefix':    STRIPE_WH_SECRET[:12] if STRIPE_WH_SECRET else '(empty)',
-        'stripe_wh_env_raw':   repr(os.environ.get('STRIPE_WEBHOOK_SECRET', 'NOT_SET'))[:40],
         'db_loaded':           bool(DATABASE_URL),
         'using_public_url':    bool(_db_pub_url and DATABASE_URL == _db_pub_url),
         'app_base_url':        APP_BASE_URL,
