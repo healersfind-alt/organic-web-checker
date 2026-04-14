@@ -198,6 +198,48 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 
 ORGANIC_RE = re.compile(r'\borganic\b', re.IGNORECASE)
 
+# ---------------------------------------------------------------------------
+# General cert term detection
+# Certifiers often list handler/broker products at category level only
+# (e.g. "Eggs", "Wine", "Organic Coffee") — no specific product names.
+# When all cert items are generic commodity terms, we cannot confirm or deny
+# specific website SKUs; they route to caution rather than red flag.
+# ---------------------------------------------------------------------------
+
+_GENERAL_CERT_RE = re.compile(
+    r'^(?:organic\s+)?(?:'
+    r'eggs?|chicken|beef|pork|lamb|turkey|veal|bison|rabbit|venison|'
+    r'dairy|milk|cream|butter|cheese|yogurt|whey|casein|'
+    r'vegetables?|fruits?|produce|berries|greens|mushrooms?|'
+    r'root\s+vegetables?|leafy\s+greens?|'
+    r'grain|grains?|wheat|corn|soybeans?|oats?|rice|barley|rye|sorghum|millet|'
+    r'coffee|tea|cacao|cocoa|herbs?|spices?|botanicals?|'
+    r'wine|beer|spirits?|cider|mead|kombucha|'
+    r'honey|maple\s+syrup|agave|'
+    r'nuts?|seeds?|legumes?|beans?|lentils?|peas?|'
+    r'oil|oils?|vinegar|juice|juices?|'
+    r'poultry|livestock|swine|aquaculture|wool|fiber|'
+    r'hay|feed|forage|silage|straw|'
+    r'flour|sugar|salt|starch|'
+    r'dried\s+\w+|fresh\s+\w+|frozen\s+\w+|'
+    r'assorted\s+(?:organic\s+)?products?|various\s+organic|'
+    r'handling|processed\s+products?'
+    r')s?(?:\s+products?)?(?:\s+and\s+\w+)?$',
+    re.IGNORECASE
+)
+
+
+def cert_has_only_general_terms(cert_products: list) -> bool:
+    """
+    Returns True if ALL cert items are generic commodity/category terms with
+    no specific product names.  When True, website-specific SKUs route to
+    caution rather than red flag — cert scope cannot confirm or deny them.
+    Ref: 7 CFR §205.201 (OSP product list detail held by certifier, not OID)
+    """
+    if not cert_products:
+        return False
+    return all(bool(_GENERAL_CERT_RE.match(p.strip())) for p in cert_products)
+
 
 def scrape_shopify(base_url: str) -> list[dict]:
     """Pull product titles and URLs from Shopify JSON API."""
@@ -211,10 +253,21 @@ def scrape_shopify(base_url: str) -> list[dict]:
         batch = r.json().get('products', [])
         if not batch:
             break
-        products.extend({
-            "title": p['title'],
-            "url": f"{base_url.rstrip('/')}/products/{p['handle']}"
-        } for p in batch)
+        for p in batch:
+            products.append({
+                "title": p['title'],
+                "url": f"{base_url.rstrip('/')}/products/{p['handle']}",
+                "source": "shopify",
+            })
+            # Also collect organic image alt-text from Shopify product images
+            for img in p.get('images', []):
+                alt = (img.get('alt') or '').strip()
+                if alt and ORGANIC_RE.search(alt) and len(alt) <= 150:
+                    products.append({
+                        "title": alt,
+                        "url": f"{base_url.rstrip('/')}/products/{p['handle']}",
+                        "source": "image_alt",
+                    })
         if len(batch) < 250:
             break
         page += 1
@@ -286,7 +339,36 @@ def scrape_generic(base_url: str) -> list[dict]:
         except Exception:
             pass
 
-    return [{"title": t, "url": u} for t, u in found.items()]
+    # Build base results with source tag
+    results = [{"title": t, "url": u, "source": "page"} for t, u in found.items()]
+
+    # ── Phase 1: Image alt-text scan ─────────────────────────────────────────
+    # Organic label images often carry alt text with specific product claims.
+    # Only collect if alt text contains "organic" and looks like a product name.
+    alt_seen = set(found.keys())
+    for img in soup.find_all('img', alt=True):
+        alt = img.get('alt', '').strip()
+        if (alt and 3 < len(alt) <= 150
+                and alt not in alt_seen
+                and ORGANIC_RE.search(alt)):
+            link = img.find_parent('a')
+            url  = make_absolute(link.get('href', '')) if link else ''
+            results.append({"title": alt, "url": url, "source": "image_alt"})
+            alt_seen.add(alt)
+
+    # ── Figcaptions ────────────────────────────────────────────────────────────
+    for figcap in soup.find_all('figcaption'):
+        text = figcap.get_text(strip=True)
+        if (text and 3 < len(text) <= 150
+                and text not in alt_seen
+                and ORGANIC_RE.search(text)):
+            fig  = figcap.find_parent('figure')
+            link = (fig or figcap).find('a') if fig else figcap.find('a')
+            url  = make_absolute(link.get('href', '')) if link else ''
+            results.append({"title": text, "url": url, "source": "figcaption"})
+            alt_seen.add(text)
+
+    return results
 
 
 def get_organic_products(website_url: str) -> list[dict]:
@@ -463,20 +545,27 @@ def run_check(operation_name: str, website_url: str,
 
     verified  = []   # ✅ Confirmed on OID certificate
     flagged   = []   # 🔴 Not on cert — non-compliance risk (§ 205.307)
-    caution   = []   # 🟡 Near-match / name variation — certifier review
+    caution   = []   # 🟡 Near-match / name variation / general cert — certifier review
     marketing = []   # 🟠 Marketing language using "organic" (§ 205.305-306)
+
+    # When cert lists only general commodity terms (e.g. "Eggs", "Wine") the
+    # specific SKUs on the website cannot be confirmed or denied from OID alone —
+    # route unmatched items to caution rather than red flag.
+    cert_general = cert_has_only_general_terms(cert["products"])
 
     for product in organic_on_site:
         title = product['title']
 
-        # 1. Marketing / category language — orange, not a product claim
-        if is_marketing_language(title):
-            marketing.append(product)
-            continue
-
-        # 2. Exact match against cert
+        # 1. Exact match against cert — check FIRST so verified items are never
+        #    misrouted to marketing even if their title contains marketing phrases.
+        #    (Fixes: product removed from cert but still marketing-regex-matched)
         if any(is_match(title, ci) for ci in cert["products"]):
             verified.append(product)
+            continue
+
+        # 2. Marketing / category language — only reached when NOT on cert
+        if is_marketing_language(title):
+            marketing.append(product)
             continue
 
         # 3. Near-match — name variation / possible caution
@@ -484,8 +573,13 @@ def run_check(operation_name: str, website_url: str,
             caution.append(product)
             continue
 
-        # 4. No match — flag as non-compliance risk
-        flagged.append(product)
+        # 4. No match
+        if cert_general:
+            # Cert shows general terms only; specific website claim can't be
+            # verified from OID — escalate to yellow caution with a note
+            caution.append({**product, '_reason': 'general_cert'})
+        else:
+            flagged.append(product)
 
     print(f"[4/4] Done. Flagged={len(flagged)}  Caution={len(caution)}  "
           f"Marketing={len(marketing)}  Verified={len(verified)}")
@@ -496,6 +590,7 @@ def run_check(operation_name: str, website_url: str,
         "status":             cert["status"],
         "location":           cert["location"],
         "scope":              cert.get("scope", []),
+        "cert_general":       cert_general,
         "cert_product_count": len(cert["products"]),
         "cert_products":      cert["products"],
         "website_url":        website_url,

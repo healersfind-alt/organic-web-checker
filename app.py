@@ -4,6 +4,8 @@ Organic Web Checker — Flask web app
 
 import os
 import uuid
+import hashlib
+import secrets
 import threading
 import json
 from contextlib import contextmanager
@@ -91,6 +93,16 @@ def init_db():
                     cached_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    key_id       TEXT PRIMARY KEY,
+                    key_hash     TEXT NOT NULL UNIQUE,
+                    email        TEXT NOT NULL,
+                    name         TEXT,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_used_at TIMESTAMPTZ
+                )
+            """)
         conn.commit()
 
 try:
@@ -147,6 +159,104 @@ def save_oid_cache(operation_name: str, cert: dict):
             conn.commit()
     except Exception as e:
         print(f'[WARN] oid_cache save failed: {e}')
+
+
+# ---------------------------------------------------------------------------
+# API key helpers
+# Keys are SHA-256 hashed for fast lookup; shown to user only once at creation.
+# Format: owc_live_<32 hex chars>
+# ---------------------------------------------------------------------------
+
+def _hash_api_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+def generate_api_key(email: str, name: str = '') -> dict:
+    """Create a new API key, persist hash to DB, return {key_id, raw_key}."""
+    raw_key = 'owc_live_' + secrets.token_hex(32)
+    key_id  = uuid.uuid4().hex[:12]
+    key_hash = _hash_api_key(raw_key)
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO api_keys (key_id, key_hash, email, name) VALUES (%s, %s, %s, %s)",
+                        (key_id, key_hash, email.lower(), name or 'My API Key')
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f'[WARN] api_key save failed: {e}')
+    return {'key_id': key_id, 'raw_key': raw_key}
+
+
+def verify_api_key(raw_key: str) -> str | None:
+    """Return the email associated with a valid API key, or None."""
+    if not raw_key or not DATABASE_URL:
+        return None
+    key_hash = _hash_api_key(raw_key)
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT email FROM api_keys WHERE key_hash = %s",
+                    (key_hash,)
+                )
+                row = cur.fetchone()
+            if row:
+                # Update last_used_at asynchronously — fire and forget
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = %s",
+                        (key_hash,)
+                    )
+                conn.commit()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def list_api_keys(email: str) -> list:
+    """Return list of {key_id, name, created_at, last_used_at, key_prefix} for an email."""
+    if not DATABASE_URL:
+        return []
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT key_id, key_hash, name, created_at, last_used_at "
+                    "FROM api_keys WHERE email = %s ORDER BY created_at DESC",
+                    (email.lower(),)
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                'key_id':      r[0],
+                'key_prefix':  'owc_live_' + r[1][:8] + '…',
+                'name':        r[2],
+                'created_at':  r[3].strftime('%Y-%m-%d') if r[3] else '',
+                'last_used_at': r[4].strftime('%Y-%m-%d %H:%M UTC') if r[4] else 'Never',
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
+def revoke_api_key(email: str, key_id: str):
+    """Delete an API key owned by the given email."""
+    if not DATABASE_URL:
+        return
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM api_keys WHERE key_id = %s AND email = %s",
+                    (key_id, email.lower())
+                )
+            conn.commit()
+    except Exception:
+        pass
 
 
 def get_session_token():
@@ -1375,6 +1485,9 @@ REPORT_PARTIAL = """
       {% for item in report.flagged | sort(attribute='title') %}
         <li class="flag-item">
           &#9888;
+          {% if item.get('source') == 'image_alt' %}
+            <span style="font-size:.62rem;padding:1px 6px;border-radius:4px;background:#EEF2FF;color:var(--primary);border:1px solid rgba(91,61,246,.2);margin-right:5px" title="Found in image alt text">&#128247; img alt</span>
+          {% endif %}
           {% if item.url %}
             <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.title }}</a>
             <a href="{{ item.url }}" target="_blank" rel="noopener" class="verify-btn">Verify &rarr;</a>
@@ -1388,21 +1501,45 @@ REPORT_PARTIAL = """
     <div class="clean">&#10003; No non-compliance flags &mdash; all specific organic product claims match the OID certificate.</div>
   {% endif %}
 
-  {# ── 🟡 Caution — name variations ─────────────────────────── #}
+  {# ── 🟡 Caution — name variations + general cert ──────────── #}
   {% if report.caution %}
     <div class="section-label amber" style="margin-top:22px">
-      &#128993; Caution &mdash; Name Variation
+      &#128993; Caution
       <span class="badge">{{ report.caution | length }}</span>
     </div>
+
+    {# General cert notice (when ALL cert products are generic category terms) #}
+    {% if report.get('cert_general') %}
+    <div style="margin-bottom:10px;padding:10px 14px;border-radius:8px;background:#FFFBEB;border:1px solid #FDE68A;font-size:.76rem;line-height:1.55;color:var(--text)">
+      <strong style="color:#D97706">&#128220; General-Terms Certificate</strong> &mdash;
+      This operation&rsquo;s OID certificate lists only general commodity terms (e.g. &ldquo;Eggs&rdquo;, &ldquo;Wine&rdquo;).
+      Specific website products cannot be confirmed or denied from OID alone.
+      Detailed product coverage is documented in the Organic System Plan held by the certifier.
+      Items below are shown as caution rather than red flag.
+      <span style="display:block;margin-top:4px;font-size:.7rem;color:var(--muted)">Ref: 7 CFR &sect;&nbsp;205.201 (OSP product list) &bull; SOE Rule &sect;&nbsp;205.2</span>
+    </div>
+    {% endif %}
+
     <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;line-height:1.55">
-      Products that closely resemble certified items but may have name differences (e.g.&nbsp;<em>Flax Oil</em> vs&nbsp;<em>Flaxseed Oil</em>).
-      Not an NOP violation &mdash; requires certifier review for alignment.<br>
-      <span style="font-size:.7rem;opacity:.7">Sub-category: name variation &bull; possible mismatch &bull; certifier judgment required</span>
+      {% if report.get('cert_general') %}
+        Products on the website that cannot be verified against the OID certificate because the cert lists only general category terms.
+        Also includes close name variations requiring certifier review.<br>
+      {% else %}
+        Products that closely resemble certified items but may have name differences (e.g.&nbsp;<em>Flax Oil</em> vs&nbsp;<em>Flaxseed Oil</em>).
+        Not an NOP violation &mdash; requires certifier review for alignment.<br>
+      {% endif %}
+      <span style="font-size:.7rem;opacity:.7">Sub-category: name variation &bull; general cert scope &bull; certifier judgment required</span>
     </p>
     <ul class="product-list scrollable-list">
       {% for item in report.caution | sort(attribute='title') %}
         <li class="caution-item">
           <span class="caution-icon">&#126;</span>
+          {% if item.get('_reason') == 'general_cert' %}
+            <span style="font-size:.62rem;padding:1px 6px;border-radius:4px;background:#FEF9C3;color:#A16207;border:1px solid #FDE68A;margin-right:5px;font-weight:700">GENERAL CERT</span>
+          {% endif %}
+          {% if item.get('source') == 'image_alt' %}
+            <span style="font-size:.62rem;padding:1px 6px;border-radius:4px;background:#EEF2FF;color:var(--primary);border:1px solid rgba(91,61,246,.2);margin-right:5px" title="Found in image alt text">&#128247; img alt</span>
+          {% endif %}
           {% if item.url %}
             <a href="{{ item.url }}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:none;border-bottom:1px solid rgba(255,208,96,.3)">{{ item.title }}</a>
           {% else %}
@@ -2505,7 +2642,7 @@ ACCOUNT_BODY = """
   </div>
   <div id="acctLoggedIn" style="display:none">
     <div class="page-title">Account</div>
-    <div class="card" style="max-width:480px;margin:0 auto">
+    <div class="card" style="max-width:540px;margin:0 auto 22px">
       <div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">Signed in as</div>
       <div id="acctEmail" style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:18px"></div>
       <div style="display:flex;gap:12px;align-items:center;padding:16px;background:var(--lavender);border-radius:12px;margin-bottom:20px">
@@ -2517,20 +2654,36 @@ ACCOUNT_BODY = """
       </div>
       <button onclick="acctDoLogout()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:8px 16px;color:var(--muted);font-size:.84rem;cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">Sign Out</button>
     </div>
+
+    {# ── API Keys ─────────────────────────────────────────────────────────── #}
+    <div class="card" style="max-width:540px;margin:0 auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div>
+          <div style="font-size:.9rem;font-weight:800;color:var(--text)">API Keys</div>
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px">Use these keys to call the checker programmatically or via AI agents</div>
+        </div>
+        <button id="apiKeyCreateBtn" onclick="apiKeyCreate()" style="font-size:.8rem;font-weight:700;padding:7px 16px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer">+ New Key</button>
+      </div>
+      <div id="apiKeyNewBox" style="display:none;padding:14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;margin-bottom:16px;font-size:.82rem">
+        <strong style="color:#16A34A">Key created — copy it now, it won&rsquo;t be shown again:</strong><br>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <code id="apiKeyNewValue" style="background:#DCFCE7;padding:6px 10px;border-radius:6px;font-size:.78rem;word-break:break-all;flex:1"></code>
+          <button onclick="navigator.clipboard.writeText(document.getElementById('apiKeyNewValue').textContent);this.textContent='Copied!'" style="font-size:.72rem;padding:5px 10px;background:var(--primary);color:#fff;border:none;border-radius:6px;cursor:pointer;white-space:nowrap">Copy</button>
+        </div>
+        <div style="margin-top:10px;font-size:.72rem;color:var(--muted)">Include this key as <code style="background:var(--bg);padding:1px 4px;border-radius:3px">X-API-Key</code> header when calling <code style="background:var(--bg);padding:1px 4px;border-radius:3px">POST /mcp</code>.</div>
+      </div>
+      <div id="apiKeyNameBox" style="display:none;margin-bottom:14px">
+        <input type="text" id="apiKeyName" placeholder="Key name (e.g. Production, Claude Agent)" style="margin-bottom:8px">
+        <div style="display:flex;gap:8px">
+          <button onclick="apiKeyConfirmCreate()" style="font-size:.8rem;font-weight:700;padding:7px 16px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer">Create</button>
+          <button onclick="document.getElementById('apiKeyNameBox').style.display='none'" style="font-size:.8rem;padding:7px 14px;background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--muted)">Cancel</button>
+        </div>
+      </div>
+      <div id="apiKeyList"><div style="font-size:.8rem;color:var(--muted)">Loading keys&hellip;</div></div>
+    </div>
   </div>
 </div>
 <script>
-async function acctInit(){
-  const res=await fetch('/api/user');
-  const d=await res.json();
-  if(d.logged_in){
-    document.getElementById('acctLoggedOut').style.display='none';
-    document.getElementById('acctLoggedIn').style.display='';
-    document.getElementById('acctEmail').textContent=d.email;
-    document.getElementById('acctCredits').textContent=d.is_admin?'Unlimited (Admin)':(d.credits+' credit'+(d.credits!==1?'s':''));
-  }
-}
-acctInit();
 function acctSwitchTab(tab){
   document.getElementById('acctTabSignin').classList.toggle('active',tab==='signin');
   document.getElementById('acctTabRegister').classList.toggle('active',tab==='register');
@@ -2564,6 +2717,62 @@ async function acctDoLogout(){
   await fetch('/logout',{method:'POST'});
   location.reload();
 }
+
+// ── API Keys ─────────────────────────────────────────────────────────────────
+async function apiKeyLoadList(){
+  const res=await fetch('/api/keys/list');
+  const d=await res.json();
+  const el=document.getElementById('apiKeyList');
+  if(!d.keys||d.keys.length===0){
+    el.innerHTML='<div style="font-size:.8rem;color:var(--muted);padding:8px 0">No API keys yet. Create one above.</div>';
+    return;
+  }
+  el.innerHTML=d.keys.map(k=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.84rem;font-weight:600;color:var(--text)">${k.name}</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:2px"><code style="background:var(--bg);padding:1px 5px;border-radius:3px">${k.key_prefix}</code> &middot; Created ${k.created_at} &middot; Last used: ${k.last_used_at}</div>
+      </div>
+      <button onclick="apiKeyRevoke('${k.key_id}')" style="font-size:.72rem;padding:4px 10px;background:none;border:1px solid #FECACA;border-radius:6px;color:var(--red);cursor:pointer">Revoke</button>
+    </div>
+  `).join('');
+}
+function apiKeyCreate(){
+  document.getElementById('apiKeyNameBox').style.display='';
+  document.getElementById('apiKeyNewBox').style.display='none';
+  document.getElementById('apiKeyName').focus();
+}
+async function apiKeyConfirmCreate(){
+  const name=document.getElementById('apiKeyName').value.trim()||'My API Key';
+  const res=await fetch('/api/keys/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  const d=await res.json();
+  document.getElementById('apiKeyNameBox').style.display='none';
+  if(d.ok){
+    document.getElementById('apiKeyNewValue').textContent=d.raw_key;
+    document.getElementById('apiKeyNewBox').style.display='';
+    apiKeyLoadList();
+  }
+}
+async function apiKeyRevoke(key_id){
+  if(!confirm('Revoke this key? Apps using it will lose access.'))return;
+  await fetch('/api/keys/'+key_id+'/revoke',{method:'POST'});
+  apiKeyLoadList();
+}
+
+// Extend acctInit to also load keys
+const _origAcctInit=typeof acctInit==='function'?acctInit:null;
+async function acctInit(){
+  const res=await fetch('/api/user');
+  const d=await res.json();
+  if(d.logged_in){
+    document.getElementById('acctLoggedOut').style.display='none';
+    document.getElementById('acctLoggedIn').style.display='';
+    document.getElementById('acctEmail').textContent=d.email;
+    document.getElementById('acctCredits').textContent=d.is_admin?'Unlimited (Admin)':(d.credits+' credit'+(d.credits!==1?'s':''));
+    apiKeyLoadList();
+  }
+}
+acctInit();
 </script>
 """
 
@@ -2687,6 +2896,54 @@ ABOUT_BODY = """
     <div class="audience-card">&#128269; Certifiers scaling compliance oversight across client rosters</div>
     <div class="audience-card">&#128101; Consultants managing multiple operations simultaneously</div>
     <div class="audience-card">&#127991; Private label operations with complex or co-packed products</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9432; Understanding Certification Scope</div>
+  <div class="about-lead">Organic compliance is not one-size-fits-all &mdash; it depends on scope.</div>
+  <div class="about-p">
+    Under the USDA National Organic Program, the <strong>scope</strong> of an organic certificate defines exactly which
+    products, activities, locations, and supply chain roles are covered. A product claim that falls outside certified
+    scope &mdash; even unintentionally &mdash; can constitute misrepresentation under 7 CFR &sect;&nbsp;205.307.
+  </div>
+  <div class="about-p">
+    <strong>Brand owners and producers</strong> (scope: CROPS or LIVESTOCK) typically have specific product names listed
+    on their OID certificate. Organic Web Checker compares website claims directly against those listed products.
+  </div>
+  <div class="about-p">
+    <strong>Handlers, brokers, distributors, and importers</strong> (scope: HANDLING) are certified for their activity
+    &mdash; not a specific product list. Under the Strengthening Organic Enforcement rule (eff. March&nbsp;19,&nbsp;2024),
+    all brokers, traders, and importers must hold organic handler certification. Their certificates often list products
+    at a general category level (e.g., &ldquo;Organic Eggs,&rdquo; &ldquo;Wine&rdquo;); the specific products and supplier
+    certifications are documented in their <strong>Organic System Plan (OSP)</strong> held by their certifying agent
+    &mdash; not publicly visible in the OID.
+  </div>
+  <div class="about-p" style="font-size:.8rem;color:var(--muted)">
+    When Organic Web Checker detects a HANDLING scope operation, flagged items are labeled for upstream supplier
+    certification verification rather than direct certificate non-compliance. The compliance question shifts from
+    &ldquo;is this on the cert?&rdquo; to &ldquo;is this documented in the OSP with verified supplier certification?&rdquo;
+    Ref: 7 CFR &sect;&nbsp;205.201 &bull; SOE Final Rule (88 FR 2799, Jan.&nbsp;19,&nbsp;2023)
+  </div>
+</div>
+
+<div class="card">
+  <div class="about-section-title">&#9733; Scope Validator</div>
+  <div class="about-lead">Phase 1 scope analysis is built into every checker run.</div>
+  <div class="about-p">
+    Every Organic Web Checker report automatically detects the operation&rsquo;s certified scope (CROPS, LIVESTOCK,
+    HANDLING, WILD CROPS) from the USDA OID and adjusts how results are presented:
+  </div>
+  <ul class="feature-list">
+    <li>&#10003; Scope badges shown on every report (CROPS, LIVESTOCK, HANDLING, WILD CROPS)</li>
+    <li>&#10003; Handling operations get a scope notice explaining OSP and upstream cert context</li>
+    <li>&#10003; Certificates listing only general commodity terms surface results as caution, not red flag</li>
+    <li>&#10003; Red flag descriptions are scope-aware &mdash; producer flags vs handler flags cite different CFR sections</li>
+    <li>&#10003; Image alt-text scanned for organic label claims on product pages</li>
+  </ul>
+  <div class="about-p" style="font-size:.78rem;color:var(--muted);margin-top:8px">
+    Future Scope Validator phases will include OSP product list comparison, facility location cross-check,
+    private label relationship mapping, and inspector prep summaries.
   </div>
 </div>
 
@@ -3425,6 +3682,207 @@ GET /job/<job_id>/download/md
 def about():
     return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
                                   page_title='About', active='about', body=ABOUT_BODY)
+
+
+# ---------------------------------------------------------------------------
+# API key endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/keys/list')
+def api_keys_list():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Not signed in'}), 401
+    return jsonify({'keys': list_api_keys(email)})
+
+
+@app.route('/api/keys/create', methods=['POST'])
+def api_keys_create():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Not signed in'}), 401
+    name = (request.json or {}).get('name', 'My API Key')[:80]
+    result = generate_api_key(email, name)
+    return jsonify({'ok': True, 'key_id': result['key_id'], 'raw_key': result['raw_key']})
+
+
+@app.route('/api/keys/<key_id>/revoke', methods=['POST'])
+def api_keys_revoke(key_id):
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Not signed in'}), 401
+    revoke_api_key(email, key_id)
+    return jsonify({'ok': True})
+
+
+# ---------------------------------------------------------------------------
+# MCP server (JSON-RPC 2.0 over HTTP)
+# AI agents call POST /mcp with standard JSON-RPC requests.
+# API key required via X-API-Key header or api_key body field.
+# ---------------------------------------------------------------------------
+
+_MCP_TOOLS = [
+    {
+        "name": "check_organic_compliance",
+        "description": (
+            "Check an organic operation's website for claims that may fall outside "
+            "their current USDA OID certificate scope. Returns a structured compliance "
+            "report with verified, flagged, caution, and marketing-language items. "
+            "Ref: 7 CFR Part 205 — USDA National Organic Program."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operation_name": {
+                    "type": "string",
+                    "description": "Operation name exactly as listed in the USDA Organic Integrity Database (OID)"
+                },
+                "website_url": {
+                    "type": "string",
+                    "description": "Full URL of the operation's website (e.g. https://example.com)"
+                },
+                "use_cache": {
+                    "type": "boolean",
+                    "description": "Use cached OID data if available (faster, ~5s vs ~60s). Default false.",
+                    "default": False
+                }
+            },
+            "required": ["operation_name", "website_url"]
+        }
+    },
+    {
+        "name": "get_oid_certificate",
+        "description": (
+            "Fetch an operation's current USDA OID certificate data including "
+            "certified products, certifier, status, and location."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operation_name": {
+                    "type": "string",
+                    "description": "Operation name as listed in the USDA Organic Integrity Database"
+                }
+            },
+            "required": ["operation_name"]
+        }
+    }
+]
+
+
+@app.route('/mcp', methods=['POST'])
+def mcp_server():
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    raw_key = (request.headers.get('X-API-Key') or
+               (request.json or {}).get('api_key', ''))
+    email = verify_api_key(raw_key)
+    if not email and not is_admin(get_logged_in_email()):
+        return jsonify({
+            "jsonrpc": "2.0",
+            "error": {"code": -32001, "message": "Unauthorized — provide a valid API key via X-API-Key header"},
+            "id": None
+        }), 401
+
+    data   = request.json or {}
+    method = data.get('method', '')
+    req_id = data.get('id')
+    params = data.get('params', {})
+
+    # ── initialize ────────────────────────────────────────────────────────────
+    if method == 'initialize':
+        return jsonify({
+            "jsonrpc": "2.0",
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "organic-web-checker", "version": "1.0.0"}
+            },
+            "id": req_id
+        })
+
+    # ── tools/list ────────────────────────────────────────────────────────────
+    elif method == 'tools/list':
+        return jsonify({"jsonrpc": "2.0", "result": {"tools": _MCP_TOOLS}, "id": req_id})
+
+    # ── tools/call ────────────────────────────────────────────────────────────
+    elif method == 'tools/call':
+        tool_name = params.get('name', '')
+        args      = params.get('arguments', {})
+
+        try:
+            if tool_name == 'check_organic_compliance':
+                op      = args.get('operation_name', '').strip()
+                website = args.get('website_url', '').strip()
+                use_c   = bool(args.get('use_cache', False))
+                if not op or not website:
+                    raise ValueError("operation_name and website_url are required")
+                if not website.startswith('http'):
+                    website = 'https://' + website
+
+                # Run check — acquires semaphore, blocks until complete
+                cert = None
+                if use_c:
+                    cached = get_cached_oid(op)
+                    if cached:
+                        cert = cached['cert']
+                with _check_semaphore:
+                    if cert is None:
+                        raw_cert = get_oid_cert(op)
+                        if 'error' not in raw_cert:
+                            save_oid_cache(op, raw_cert)
+                        cert = raw_cert
+                    report = run_check(op, website, cert=cert)
+
+                text_out = json.dumps(report, indent=2, default=str)
+                return jsonify({
+                    "jsonrpc": "2.0",
+                    "result": {"content": [{"type": "text", "text": text_out}]},
+                    "id": req_id
+                })
+
+            elif tool_name == 'get_oid_certificate':
+                op = args.get('operation_name', '').strip()
+                if not op:
+                    raise ValueError("operation_name is required")
+                cached = get_cached_oid(op)
+                if cached:
+                    cert = cached['cert']
+                    cert['_source'] = f"cached ({cached['cached_at']})"
+                else:
+                    with _check_semaphore:
+                        cert = get_oid_cert(op)
+                    if 'error' not in cert:
+                        save_oid_cache(op, cert)
+                        cert['_source'] = 'live'
+                return jsonify({
+                    "jsonrpc": "2.0",
+                    "result": {"content": [{"type": "text", "text": json.dumps(cert, indent=2)}]},
+                    "id": req_id
+                })
+
+            else:
+                return jsonify({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
+                    "id": req_id
+                }), 400
+
+        except Exception as e:
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [{"type": "text", "text": f"Error: {str(e)}"}],
+                    "isError": True
+                },
+                "id": req_id
+            })
+
+    else:
+        return jsonify({
+            "jsonrpc": "2.0",
+            "error": {"code": -32601, "message": f"Method not found: {method}"},
+            "id": req_id
+        }), 400
 
 
 @app.route('/static/<path:filename>')
