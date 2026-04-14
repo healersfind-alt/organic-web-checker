@@ -3819,6 +3819,21 @@ def mcp_server():
                 if not website.startswith('http'):
                     website = 'https://' + website
 
+                # ── Credit gate ───────────────────────────────────────────────
+                # Same cost as a web check: 1 credit deducted on success.
+                # Admin email = unlimited; no credits = error before running.
+                if not is_admin(email):
+                    if get_user_credits(email) < 1:
+                        return jsonify({
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32002,
+                                "message": "Insufficient credits. Purchase more at "
+                                           "https://www.organicwebchecker.com/pricing"
+                            },
+                            "id": req_id
+                        }), 402
+
                 # Run check — acquires semaphore, blocks until complete
                 cert = None
                 if use_c:
@@ -3832,6 +3847,10 @@ def mcp_server():
                             save_oid_cache(op, raw_cert)
                         cert = raw_cert
                     report = run_check(op, website, cert=cert)
+
+                # Deduct credit after successful run
+                if not is_admin(email) and 'error' not in report:
+                    deduct_user_credit(email)
 
                 text_out = json.dumps(report, indent=2, default=str)
                 return jsonify({
