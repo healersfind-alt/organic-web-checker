@@ -371,14 +371,105 @@ def scrape_generic(base_url: str) -> list[dict]:
     return results
 
 
+def scrape_woocommerce(base_url: str) -> list[dict]:
+    """
+    WooCommerce-specific scraper.
+    1. Tries unauthenticated WooCommerce REST API (v3, then v2) — many stores
+       leave published products publicly readable.
+    2. Falls back to scraping /shop, /store, /products pages with
+       WooCommerce-specific CSS selectors.
+    """
+    base = base_url.rstrip('/')
+    products = []
+
+    # ── Step 1: WooCommerce REST API ──────────────────────────────────────────
+    for ver in ('v3', 'v2'):
+        try:
+            page = 1
+            while True:
+                r = requests.get(
+                    f"{base}/wp-json/wc/{ver}/products",
+                    params={"per_page": 100, "page": page, "status": "publish"},
+                    headers=HEADERS, timeout=12
+                )
+                if r.status_code != 200:
+                    break
+                batch = r.json()
+                if not isinstance(batch, list) or not batch:
+                    break
+                for p in batch:
+                    if not isinstance(p, dict):
+                        continue
+                    name = p.get('name', '').strip()
+                    link = p.get('permalink', '') or (
+                        f"{base}/product/{p['slug']}" if p.get('slug') else base
+                    )
+                    if name:
+                        products.append({"title": name, "url": link, "source": "woocommerce"})
+                    # Image alt-text from product images
+                    for img in p.get('images', []):
+                        alt = (img.get('alt') or '').strip()
+                        if alt and ORGANIC_RE.search(alt) and len(alt) <= 150:
+                            products.append({"title": alt, "url": link, "source": "image_alt"})
+                if len(batch) < 100:
+                    break
+                page += 1
+            if products:
+                return products
+        except Exception:
+            pass
+
+    # ── Step 2: HTML scrape of /shop, /store, /products ──────────────────────
+    wc_selectors = [
+        'h2.woocommerce-loop-product__title',
+        'h3.woocommerce-loop-product__title',
+        '.woocommerce-loop-product__title',
+        '.wc-block-grid__product-title',
+        '.wc-block-grid__product-add-to-cart + .wc-block-grid__product-title',
+        'li.product .woocommerce-loop-product__title',
+        'ul.products h2', 'ul.products h3',
+    ]
+    for path in ('/shop', '/store', '/products', ''):
+        try:
+            r = requests.get(f"{base}{path}", headers=HEADERS, timeout=15)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, 'html.parser')
+            # Only continue if this looks like a WooCommerce page
+            if not soup.select('.woocommerce, [class*="woocommerce"], .wc-block-grid'):
+                continue
+            found = {}
+            for sel in wc_selectors:
+                for el in soup.select(sel):
+                    text = el.get_text(strip=True)
+                    if text and len(text) > 3 and text not in found:
+                        anchor = el.find_parent('a') or el.find('a')
+                        href = anchor.get('href', '') if anchor else ''
+                        found[text] = (href if href.startswith('http')
+                                       else f"{base}/{href.lstrip('/')}" if href
+                                       else f"{base}{path}")
+            if found:
+                products.extend(
+                    {"title": t, "url": u, "source": "woocommerce"}
+                    for t, u in found.items()
+                )
+                return products
+        except Exception:
+            continue
+
+    return products
+
+
 def get_organic_products(website_url: str) -> list[dict]:
     """
-    Try Shopify API first; fall back to generic scraper.
+    Scraping pipeline: Shopify → WooCommerce → generic HTML.
     Returns only products with 'organic' in the title.
     """
     all_products = scrape_shopify(website_url)
 
-    # If Shopify returned nothing useful, fall back
+    if len(all_products) < 3:
+        all_products = scrape_woocommerce(website_url)
+
     if len(all_products) < 3:
         all_products = scrape_generic(website_url)
 

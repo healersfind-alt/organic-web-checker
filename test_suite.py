@@ -48,14 +48,15 @@ TEST_CASES = [
     },
 
     # ── WooCommerce ────────────────────────────────────────────────────────
-    # Add a real WooCommerce organic shop here when you find one.
+    # Scraper tries: REST API (/wp-json/wc/v3/products) → /shop page HTML
+    # Add cases from the 100-check manual run when WooCommerce sites come up.
     # {
     #     "name":       "Example WooCommerce Organic Shop",
     #     "url":        "https://example.com",
     #     "platform":   "WooCommerce",
     #     "expect_min": 3,
     #     "expect_max": None,
-    #     "notes":      "WooCommerce product grid",
+    #     "notes":      "WooCommerce — confirm REST API or /shop page returns products",
     # },
 ]
 
