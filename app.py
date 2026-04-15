@@ -561,8 +561,13 @@ GLOBAL_CSS = """
     display: flex; align-items: center; gap: 10px; text-decoration: none;
   }
   .header-logo-icon { width: 48px; height: 48px; flex-shrink: 0; }
-  .header-wordmark  { font-size: 1rem; font-weight: 800; color: var(--primary); }
-  header h1 { font-size: 1rem; font-weight: 800; color: var(--primary); }
+  .header-wordmark  { font-size: 1rem; font-weight: 800; }
+  header h1 { font-size: 1rem; font-weight: 800; }
+  /* Two-color wordmark — "Organic" green, "Web Checker" purple */
+  .wm-organic { color: var(--green); }
+  .wm-checker { color: var(--primary); }
+  /* Footer is dark bg — use lighter purple for legibility */
+  .footer-brand-name .wm-checker { color: #A78BFA; }
   header p  { font-size: .78rem; color: var(--muted); margin-top: 2px; }
 
   .header-right { display: flex; align-items: center; gap: 10px; justify-self: end; }
@@ -1246,7 +1251,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
 <header>
   <a href="/" class="header-logo">
     <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
-    <span class="header-wordmark">Organic Web Checker</span>
+    <span class="header-wordmark"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></span>
   </a>
   <nav class="header-nav">
     <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Product</a>
@@ -1947,7 +1952,7 @@ MAIN_HTML = """<!DOCTYPE html>
 <header>
   <a href="/" class="header-logo">
     <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
-    <span class="header-wordmark">Organic Web Checker</span>
+    <span class="header-wordmark"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></span>
   </a>
   <nav class="header-nav">
     <a href="/"        class="nav-link active">Product</a>
@@ -2283,7 +2288,7 @@ MAIN_HTML = """<!DOCTYPE html>
 <footer class="site-footer">
   <div class="site-footer-inner">
     <div class="footer-brand">
-      <div class="footer-brand-name">Organic Web Checker</div>
+      <div class="footer-brand-name"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></div>
       <div class="footer-brand-desc">AI-assisted organic compliance review for handlers, certifiers, and compliance teams. Compares website claims against live USDA OID certificate data.</div>
       <div class="footer-disclaimer">
         Not a certifying agent. Results are decision-support only and require human review.<br>
