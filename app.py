@@ -2528,11 +2528,11 @@ function updateAuthUI(email,credits){
 # ---------------------------------------------------------------------------
 
 TIERS = [
-    {"count": 1,   "price": 4.99, "per": 4.99, "disc": None,    "name": "Spot Check",     "desc": "Run one check on your operation's website. Great for a first self-review, a quick verification before a certification renewal, or a one-off product claim audit.", "featured": False},
-    {"count": 10,  "price": 39,   "per": 3.90, "disc": "22% off","name": "Small Operation","desc": "Ten checks for handlers and brands doing periodic self-audits, reviewing seasonal product updates, or spot-checking specific sections of a product catalog.", "featured": False},
-    {"count": 25,  "price": 85,   "per": 3.40, "disc": "32% off","name": "Active Brand",   "desc": "Regular compliance reviews for growing operations. Ideal for brands with ongoing product changes, and for certifiers or consultants doing structured check-ins across a handful of clients.", "featured": True},
-    {"count": 50,  "price": 149,  "per": 2.98, "disc": "40% off","name": "Full Audit",     "desc": "Comprehensive coverage for established organic brands. Run full catalog sweeps, pre-certification reviews, or systematic checks across multiple site sections and product lines.", "featured": False},
-    {"count": 100, "price": 259,  "per": 2.59, "disc": "48% off","name": "High Volume",    "desc": "For large operations, multi-brand portfolios, and certifiers running systematic reviews across a full client roster. Covers quarterly review cycles at scale.", "featured": False},
+    {"count": 1,   "price": 25,   "per": 25.00, "disc": None,    "name": "Single Check",   "desc": "One compliance check against a live USDA OID certificate. Ideal for a first self-review, a pre-renewal spot check, or verifying a specific product claim before launch.", "featured": False},
+    {"count": 10,  "price": 220,  "per": 22.00, "disc": "12% off","name": "Small Operation","desc": "Ten checks for handlers and brands doing periodic self-audits, reviewing seasonal product updates, or spot-checking specific sections of a product catalog.", "featured": False},
+    {"count": 25,  "price": 500,  "per": 20.00, "disc": "20% off","name": "Active Brand",   "desc": "Regular compliance reviews for growing operations. Ideal for brands with ongoing product changes, pre-certification prep, or structured quarterly reviews.", "featured": True},
+    {"count": 50,  "price": 900,  "per": 18.00, "disc": "28% off","name": "Full Audit",     "desc": "Comprehensive coverage for established organic brands. Run full catalog sweeps, multi-site reviews, or pre-retailer-audit checks across a large product portfolio.", "featured": False},
+    {"count": 100, "price": 1500, "per": 15.00, "disc": "40% off — best value","name": "High Volume", "desc": "For large handlers and multi-brand portfolios. Maximum volume discount — $15/check is the floor across all tiers. Credits never expire.", "featured": False},
 ]
 
 def pricing_page_html():
@@ -2559,13 +2559,13 @@ def pricing_page_html():
         <div class="pricing-card">
           <div class="pricing-icon-row">
             <img src="/static/icon.png" class="pricing-icon" alt="">
-            <div class="pricing-mult" style="color:var(--cyan);text-shadow:0 0 14px rgba(0,229,204,.4)">&infin;</div>
+            <div class="pricing-mult" style="color:var(--cyan);text-shadow:0 0 14px rgba(0,229,204,.4)">CA</div>
           </div>
-          <div class="pricing-tier-name">Enterprise / Agency</div>
-          <div class="pricing-price" style="font-size:1.4rem;color:var(--cyan)">Custom</div>
-          <div class="pricing-per">Volume pricing</div>
-          <div class="pricing-disc" style="color:var(--cyan)">50%+ off base rate</div>
-          <div class="pricing-desc">For agencies and large certifiers running 500+ checks per year. Custom contract, volume discount, and priority support.</div>
+          <div class="pricing-tier-name">Certifying Agents</div>
+          <div class="pricing-price" style="font-size:1.4rem;color:var(--cyan)">$25 / client</div>
+          <div class="pricing-per">Flat rate &mdash; no volume discount</div>
+          <div class="pricing-disc" style="color:var(--cyan)">Bake it into your cert fees</div>
+          <div class="pricing-desc">USDA-accredited certifying agents pay the standard $25/check per client, regardless of roster size. Run desk-review compliance checks before sending inspectors. Contact us to set up a certifier account.</div>
           <a href="mailto:hello@organicwebchecker.com" class="pricing-cta contact">Contact Us</a>
         </div>"""
 
@@ -2573,8 +2573,8 @@ def pricing_page_html():
     <div class="pricing-intro">
       <img src="/static/icon.png" class="pricing-big-icon" alt="Organic Web Checker">
       <div class="pricing-intro-text">
-        <h2>Checkers are organic web checks</h2>
-        <p>Each checker runs a live comparison of a client&rsquo;s website against their current USDA Organic Integrity Database certificate &mdash; flagging products marketed as organic that aren&rsquo;t on the cert. Credits never expire.</p>
+        <h2>One checker. One compliance review.</h2>
+        <p>Each checker runs a live comparison of a website against a live USDA Organic Integrity Database certificate &mdash; flagging products marketed as organic that may not be authorized on the cert. $25 per check. Volume packs available for operations. Credits never expire.</p>
       </div>
     </div>
     <div class="pricing-grid">
