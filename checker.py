@@ -483,6 +483,52 @@ def get_organic_products(website_url: str) -> list[dict]:
 # OID scraping via Playwright
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Business type detection (Scope Validator Phase 2)
+# Attempts to identify the sub-type of a HANDLING operation:
+# Importer, Broker, Distributor, Processor, etc.
+# Source: OID detail page (primary) or keyword inference from cert text.
+# ---------------------------------------------------------------------------
+
+_BUSINESS_TYPE_FIELD_RE = re.compile(
+    r'(?:Business\s*Type|Activity\s*Type|Operation\s*Type|Facility\s*Type'
+    r'|Certification\s*Type)\s*[:\|]\s*([^\n\|]{2,60})',
+    re.IGNORECASE
+)
+
+# Ordered by specificity — more specific terms first
+_BT_KEYWORDS = [
+    (re.compile(r'\bimport(?:er|ing|s)?\b', re.I),        'Importer'),
+    (re.compile(r'\bexport(?:er|ing|s)?\b', re.I),        'Exporter'),
+    (re.compile(r'\bbroker(?:age|ing|s)?\b', re.I),       'Broker'),
+    (re.compile(r'\btraders?\b', re.I),                   'Trader'),
+    (re.compile(r'\bdistribut(?:or|ion|ing)\b', re.I),    'Distributor'),
+    (re.compile(r'\bco[- ]?pack(?:er|ing)?\b', re.I),     'Co-Packer'),
+    (re.compile(r'\bmanufactur(?:er|ing)\b', re.I),       'Manufacturer'),
+    (re.compile(r'\bprocess(?:or|ing)\b', re.I),          'Processor'),
+    (re.compile(r'\bpack(?:er|aging|ing)\b', re.I),       'Packer'),
+    (re.compile(r'\bretailers?\b', re.I),                 'Retailer'),
+    (re.compile(r'\bwarehouse\b', re.I),                  'Warehouse/Storage'),
+]
+
+def _parse_business_type(text: str) -> str:
+    """
+    Extract HANDLING sub-type from OID detail page text or cert block.
+    Returns a label ('Importer', 'Broker', 'Processor', etc.) or '' if unknown.
+    """
+    # Try explicit labeled field first (e.g. "Business Type: Importer")
+    m = _BUSINESS_TYPE_FIELD_RE.search(text)
+    if m:
+        val = m.group(1).strip().rstrip('.,;')
+        if val and len(val) < 60:
+            return val.title()
+    # Keyword detection
+    for pattern, label in _BT_KEYWORDS:
+        if pattern.search(text):
+            return label
+    return ""
+
+
 def _clean_oid_search(name: str) -> str:
     """Strip legal suffixes/punctuation before OID search field.
     'Devenish Nutrition, LLC' → 'Devenish Nutrition'
@@ -521,6 +567,33 @@ def get_oid_cert(operation_name: str) -> dict:
         time.sleep(6)
 
         body_text = page.inner_text("body")
+
+        # ── Phase 2: Navigate to detail page for Business Type ────────────────
+        # Attempt to click the matching result row in the Telerik grid.
+        # If this fails for any reason, we fall back to keyword detection
+        # on the already-captured body text — the check still completes.
+        detail_text = ""
+        try:
+            cleaned_for_click = _clean_oid_search(operation_name)
+            # Telerik grid rows — try common selectors
+            for sel in [
+                f'tr.k-master-row:has-text("{cleaned_for_click}")',
+                f'tr[role="row"]:has-text("{cleaned_for_click}")',
+                f'.k-grid-content tr:has-text("{cleaned_for_click}")',
+                f'table tr:has-text("{cleaned_for_click}")',
+            ]:
+                try:
+                    row = page.locator(sel).first
+                    if row.count() > 0 and row.is_visible(timeout=2000):
+                        row.click()
+                        time.sleep(5)
+                        detail_text = page.inner_text("body")
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         browser.close()
 
     def _oid_norm(s: str) -> str:
@@ -536,10 +609,11 @@ def get_oid_cert(operation_name: str) -> dict:
     # Parse the result row
     lines = [l.strip() for l in body_text.split('\n') if l.strip()]
     result = {
-        "operation": operation_name,
-        "certifier": "", "status": "", "location": "",
-        "scope": [],        # e.g. ['HANDLING'] or ['CROPS', 'LIVESTOCK']
-        "products": [],
+        "operation":     operation_name,
+        "certifier":     "", "status": "", "location": "",
+        "scope":         [],   # e.g. ['HANDLING'] or ['CROPS', 'LIVESTOCK']
+        "business_type": "",   # Phase 2: e.g. 'Importer', 'Broker', 'Processor'
+        "products":      [],
     }
 
     for i, line in enumerate(lines):
@@ -567,6 +641,10 @@ def get_oid_cert(operation_name: str) -> dict:
                 block, re.IGNORECASE
             )
             result["scope"] = sorted(set(s.upper().replace(' ', '_') for s in scope_found))
+
+            # Business type (Phase 2) — from detail page or keyword inference
+            combined = (detail_text or "") + "\n" + block
+            result["business_type"] = _parse_business_type(combined)
 
             # Products — everything after "HANDLING:" or "CROPS:"
             prod_match = re.search(r'(?:HANDLING|CROPS|LIVESTOCK):.*?:(.*?)(?:\n\d|\Z)', block, re.DOTALL)
@@ -681,6 +759,7 @@ def run_check(operation_name: str, website_url: str,
         "status":             cert["status"],
         "location":           cert["location"],
         "scope":              cert.get("scope", []),
+        "business_type":      cert.get("business_type", ""),
         "cert_general":       cert_general,
         "cert_product_count": len(cert["products"]),
         "cert_products":      cert["products"],

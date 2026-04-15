@@ -414,7 +414,8 @@ def report_to_markdown(report: dict) -> str:
         f"- **Certifier:** {report.get('certifier', '')}",
         f"- **Status:** {report.get('status', '')}",
         f"- **Location:** {report.get('location', '')}",
-        f"- **Cert Scope:** {', '.join(report.get('scope', [])) or 'Not detected'}",
+        f"- **Cert Scope:** {', '.join(report.get('scope', [])) or 'Not detected'}"
+        + (f" — {report['business_type']}" if report.get('business_type') else ""),
         f"- **Website:** {report.get('website_url', '')}",
         f"- **OID Data:** {'Cached (' + report.get('oid_cached_at', '') + ') — verify live at organic.ams.usda.gov' if report.get('oid_source') == 'cached' else 'Live'}",
         "",
@@ -1419,6 +1420,9 @@ REPORT_PARTIAL = """
             {% elif s == 'LIVESTOCK' %}background:#FFF7ED;color:#D97706;border:1px solid #FED7AA
             {% else %}background:#F8FAFC;color:var(--muted);border:1px solid var(--border){% endif %}">{{ s }}</span>
         {% endfor %}
+        {% if report.get('business_type') %}
+          <span style="display:inline-block;font-size:.65rem;padding:2px 8px;border-radius:6px;font-weight:600;background:#F5F3FF;color:#7C3AED;border:1px solid rgba(124,58,237,.2)">{{ report.business_type }}</span>
+        {% endif %}
       {% else %}<span style="color:var(--muted);font-size:.78rem">Not detected</span>{% endif %}
     </span></div>
     <div class="meta-item"><label>Website</label><span><a href="{{ report.website_url }}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(0,229,204,.3)">{{ report.website_url }}</a></span></div>
@@ -1427,15 +1431,28 @@ REPORT_PARTIAL = """
   {# ── Handling scope notice ─────────────────────────────────────── #}
   {% if 'HANDLING' in (report.get('scope') or []) %}
   <div style="margin-bottom:18px;padding:12px 16px;border-radius:10px;background:#EEF2FF;border:1px solid rgba(91,61,246,.18);font-size:.78rem;line-height:1.6;color:var(--text)">
-    <strong style="color:var(--primary)">&#9432; Handling Operation Scope Notice</strong><br>
-    This operation is certified as a <strong>handler</strong> (broker, distributor, importer, or processor).
-    Handler certificates typically list products at a general category level (e.g., &ldquo;Organic Eggs&rdquo;).
-    Specific branded or SKU-level products are documented in the operation&rsquo;s <strong>Organic System Plan (OSP)</strong>
-    held by their certifier &mdash; not publicly visible in OID.<br>
+    <strong style="color:var(--primary)">&#9432; Handling Operation Scope Notice</strong>
+    {% if report.get('business_type') %}<span style="margin-left:6px;font-size:.65rem;padding:1px 7px;border-radius:5px;font-weight:600;background:#F5F3FF;color:#7C3AED;border:1px solid rgba(124,58,237,.2)">{{ report.business_type }}</span>{% endif %}<br>
+    {% if report.get('business_type') == 'Importer' %}
+      This operation is certified as an <strong>importer</strong>. Post-SOE (eff. March&nbsp;19,&nbsp;2024), all importers of
+      organic products must hold NOP handler certification. Website organic claims require both the importer&rsquo;s
+      own NOP cert coverage and verified foreign certification for each imported product.
+    {% elif report.get('business_type') in ('Broker', 'Trader') %}
+      This operation is certified as a <strong>{{ report.business_type|lower }}</strong>. Post-SOE (eff. March&nbsp;19,&nbsp;2024),
+      brokers and traders handling organic products must be NOP-certified handlers. Website organic product
+      listings require upstream supplier certification documented in the Organic System Plan (OSP).
+    {% elif report.get('business_type') == 'Distributor' %}
+      This operation is certified as a <strong>distributor</strong>. Organic products distributed must be covered
+      by upstream certified supplier documentation in the Organic System Plan (OSP).
+    {% else %}
+      This operation is certified as a <strong>handler</strong> (processor, distributor, broker, or importer).
+      Handler certificates typically list products at a general category level (e.g., &ldquo;Organic Eggs&rdquo;).
+      Specific SKU-level products are in the operation&rsquo;s <strong>Organic System Plan (OSP)</strong>
+      held by their certifier &mdash; not publicly visible in OID.
+    {% endif %}<br>
     <span style="color:var(--muted);font-size:.72rem">
       Flagged items below indicate products not found on this operation&rsquo;s OID certificate.
-      For handling operations, the compliance question is whether each product is covered by a documented
-      upstream supplier certification in the OSP.
+      The compliance question is whether each product is covered by documented upstream supplier certification in the OSP.
       Ref: 7 CFR &sect;&nbsp;205.201 (OSP requirements) &bull; SOE Rule (eff. March&nbsp;19,&nbsp;2024)
     </span>
   </div>
