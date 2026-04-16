@@ -96,6 +96,18 @@ def init_db():
             """)
             cur.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS promo_code TEXT")
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS certifier_requests (
+                    id           SERIAL PRIMARY KEY,
+                    first_name   TEXT NOT NULL,
+                    last_name    TEXT NOT NULL,
+                    organization TEXT NOT NULL,
+                    nop_number   TEXT NOT NULL,
+                    email        TEXT NOT NULL,
+                    status       TEXT NOT NULL DEFAULT 'pending',
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
                     key_id       TEXT PRIMARY KEY,
                     key_hash     TEXT NOT NULL UNIQUE,
@@ -2593,12 +2605,12 @@ def pricing_page_html():
             <div class="pricing-mult" style="color:var(--cyan);text-shadow:0 0 14px rgba(20,184,166,.3)">CA</div>
           </div>
           <div class="pricing-tier-name">Certifying Agents</div>
-          <div style="display:inline-block;background:rgba(20,184,166,.12);border:1px solid rgba(20,184,166,.35);border-radius:6px;padding:5px 11px;font-size:.78rem;font-weight:800;color:var(--cyan);letter-spacing:.06em;margin-bottom:10px;font-family:monospace">CERTIFIER50</div>
+          <div style="display:inline-block;background:rgba(20,184,166,.12);border:1px solid rgba(20,184,166,.35);border-radius:6px;padding:5px 11px;font-size:.78rem;font-weight:700;color:var(--cyan);margin-bottom:10px">Exclusive discount</div>
           <div class="pricing-price" style="font-size:1.7rem;color:var(--cyan)">50% off</div>
-          <div class="pricing-per">any tier &mdash; from $12.50/check</div>
-          <div class="pricing-disc" style="color:var(--cyan)">Enter code at checkout</div>
-          <div class="pricing-desc">USDA-accredited certifying agents get 50% off any package. Run desk-review compliance checks before sending inspectors &mdash; bake it into your cert fees. Choose any tier above and enter the promo code at checkout.</div>
-          <button onclick="showCertPromo()" class="pricing-cta" style="background:transparent;border:2px solid var(--cyan);color:var(--cyan)">Get 50% Off &rarr;</button>
+          <div class="pricing-per">any tier &mdash; verified certifiers only</div>
+          <div class="pricing-disc" style="color:var(--cyan)">Promo code sent after verification</div>
+          <div class="pricing-desc">USDA-accredited certifying agents get 50% off any package. Run desk-review compliance checks before sending inspectors &mdash; bake it into your cert fees. Submit your NOP accreditation number for verification.</div>
+          <button onclick="openCertModal()" class="pricing-cta" style="background:transparent;border:2px solid var(--cyan);color:var(--cyan)">Request Certifier Access &rarr;</button>
         </div>"""
 
     # Build the JS tier array without needing f-string brace escaping inside
@@ -2608,9 +2620,24 @@ def pricing_page_html():
     ) + "];"
 
     return f"""
-    <div id="cert-promo-banner" style="display:none;background:rgba(20,184,166,.08);border:1px solid rgba(20,184,166,.35);border-radius:12px;padding:14px 22px;margin-bottom:22px;text-align:center;font-size:.88rem;color:var(--cyan);font-weight:600">
-      Certifying agent discount &mdash; use code <code style="background:rgba(20,184,166,.18);padding:2px 9px;border-radius:5px;font-size:.84rem">CERTIFIER50</code> at checkout for 50% off any tier &mdash; from $12.50/check
-      <button onclick="document.getElementById('cert-promo-banner').style.display='none'" style="background:none;border:none;color:var(--cyan);font-size:.95rem;cursor:pointer;margin-left:10px;opacity:.7">&times;</button>
+    <div id="certModal" style="display:none" class="modal-overlay" onclick="if(event.target===this)closeCertModal()">
+      <div class="modal-card" style="max-width:480px">
+        <button class="modal-close" onclick="closeCertModal()">&times;</button>
+        <div class="modal-title">Certifying Agent Verification</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:18px;line-height:1.6">Submit your information for verification. Once confirmed you&rsquo;re a USDA-accredited certifying agent, we&rsquo;ll email your 50% discount code &mdash; typically within 1 business day.</div>
+        <div id="certModalMsg" style="display:none;margin-bottom:14px" class="auth-msg"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div><label style="font-size:.78rem;font-weight:600;color:var(--muted)">First name</label><input type="text" id="certFirst" placeholder="Jane" style="margin-top:4px"></div>
+          <div><label style="font-size:.78rem;font-weight:600;color:var(--muted)">Last name</label><input type="text" id="certLast" placeholder="Smith" style="margin-top:4px"></div>
+        </div>
+        <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Certifying agency / organization</label>
+        <input type="text" id="certOrg" placeholder="e.g. MOSA, CCOF, OCIA" style="margin-top:4px;margin-bottom:10px">
+        <label style="font-size:.78rem;font-weight:600;color:var(--muted)">USDA NOP accreditation number</label>
+        <input type="text" id="certNOP" placeholder="e.g. USDA-AMS-NOP-12-0001" style="margin-top:4px;margin-bottom:10px">
+        <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Work email</label>
+        <input type="email" id="certEmail" placeholder="you@youragency.org" style="margin-top:4px;margin-bottom:16px">
+        <button onclick="submitCertRequest()" class="btn-glass" style="width:100%">Submit Verification Request</button>
+      </div>
     </div>
     <div class="pricing-intro">
       <img src="/static/icon.png" class="pricing-big-icon" alt="Organic Web Checker">
@@ -2693,9 +2720,42 @@ def pricing_page_html():
       document.getElementById('calcResult').innerHTML = html;
     }}
 
-    function showCertPromo() {{
-      document.getElementById('cert-promo-banner').style.display = 'block';
-      window.scrollTo({{top: 0, behavior: 'smooth'}});
+    function openCertModal() {{
+      document.getElementById('certModal').style.display = 'flex';
+      document.getElementById('certModalMsg').style.display = 'none';
+    }}
+    function closeCertModal() {{
+      document.getElementById('certModal').style.display = 'none';
+    }}
+    async function submitCertRequest() {{
+      const first = document.getElementById('certFirst').value.trim();
+      const last  = document.getElementById('certLast').value.trim();
+      const org   = document.getElementById('certOrg').value.trim();
+      const nop   = document.getElementById('certNOP').value.trim();
+      const email = document.getElementById('certEmail').value.trim();
+      const msg   = document.getElementById('certModalMsg');
+      if (!first || !last || !org || !nop || !email) {{
+        msg.style.display = 'block'; msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
+        msg.textContent = 'Please fill in all fields.'; return;
+      }}
+      try {{
+        const res  = await fetch('/api/certifier-request', {{
+          method: 'POST', headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{first_name: first, last_name: last, organization: org, nop_number: nop, email}})
+        }});
+        const data = await res.json();
+        if (data.ok) {{
+          msg.style.display = 'block'; msg.style.background = '#F0FDF4'; msg.style.color = '#15803D';
+          msg.textContent = 'Request submitted! We\u2019ll review your NOP number and email your code within 1 business day.';
+          document.querySelectorAll('#certFirst,#certLast,#certOrg,#certNOP,#certEmail').forEach(function(el) {{ el.value = ''; }});
+        }} else {{
+          msg.style.display = 'block'; msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
+          msg.textContent = data.error || 'Submission failed. Please try again.';
+        }}
+      }} catch(e) {{
+        msg.style.display = 'block'; msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
+        msg.textContent = 'Network error \u2014 please try again.';
+      }}
     }}
 
     async function buyTier(i) {{
@@ -3812,6 +3872,122 @@ GET /job/<job_id>/download/md
 def about():
     return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
                                   page_title='About', active='about', body=ABOUT_BODY)
+
+
+# ---------------------------------------------------------------------------
+# Certifier verification
+# ---------------------------------------------------------------------------
+
+@app.route('/api/certifier-request', methods=['POST'])
+def certifier_request():
+    data       = request.get_json(force=True) or {}
+    first_name = (data.get('first_name') or '').strip()[:80]
+    last_name  = (data.get('last_name')  or '').strip()[:80]
+    organization = (data.get('organization') or '').strip()[:200]
+    nop_number = (data.get('nop_number')  or '').strip()[:100]
+    email      = (data.get('email')       or '').strip()[:200]
+    if not all([first_name, last_name, organization, nop_number, email]):
+        return jsonify({'ok': False, 'error': 'All fields are required.'}), 400
+    if '@' not in email:
+        return jsonify({'ok': False, 'error': 'Invalid email address.'}), 400
+    if not DATABASE_URL:
+        return jsonify({'ok': False, 'error': 'Service temporarily unavailable.'}), 503
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO certifier_requests
+                        (first_name, last_name, organization, nop_number, email)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (first_name, last_name, organization, nop_number, email))
+            conn.commit()
+        print(f'[CERTIFIER REQUEST] {first_name} {last_name} | {organization} | NOP: {nop_number} | {email}')
+        return jsonify({'ok': True})
+    except Exception as e:
+        print(f'[WARN] certifier_request DB write failed: {e}')
+        return jsonify({'ok': False, 'error': 'Could not save request. Please try again.'}), 500
+
+
+@app.route('/admin/certifier-requests')
+def admin_certifier_requests():
+    if get_logged_in_email() != ADMIN_EMAIL:
+        return 'Unauthorized', 403
+    rows = []
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, first_name, last_name, organization, nop_number, email, status, created_at
+                    FROM certifier_requests ORDER BY created_at DESC
+                """)
+                rows = cur.fetchall()
+    except Exception as e:
+        rows = []
+    table_rows = ""
+    for r in rows:
+        rid, first, last, org, nop, email, status, created_at = r
+        ts = created_at.strftime('%Y-%m-%d %H:%M UTC') if created_at else ''
+        status_color = '#15803D' if status == 'approved' else ('#B91C1C' if status == 'denied' else '#92400E')
+        table_rows += f"""<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:10px 12px;font-size:.82rem;color:var(--muted)">{ts}</td>
+          <td style="padding:10px 12px;font-size:.84rem;font-weight:600">{first} {last}</td>
+          <td style="padding:10px 12px;font-size:.84rem">{org}</td>
+          <td style="padding:10px 12px;font-size:.82rem;font-family:monospace">{nop}</td>
+          <td style="padding:10px 12px;font-size:.82rem"><a href="mailto:{email}" style="color:var(--primary)">{email}</a></td>
+          <td style="padding:10px 12px"><span style="font-size:.76rem;font-weight:700;color:{status_color}">{status.upper()}</span></td>
+          <td style="padding:10px 12px;font-size:.8rem">
+            <button onclick="updateCertStatus({rid},'approved')" style="background:var(--neon);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:.75rem;margin-right:4px">Approve</button>
+            <button onclick="updateCertStatus({rid},'denied')" style="background:var(--red);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:.75rem">Deny</button>
+          </td>
+        </tr>"""
+    body = f"""
+    <div class="page-title">Certifier Requests</div>
+    <div class="page-subtitle">Review NOP accreditation numbers before sending the promo code manually.</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--lavender);text-align:left">
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Submitted</th>
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Name</th>
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Organization</th>
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">NOP #</th>
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Email</th>
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Status</th>
+          <th style="padding:10px 12px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Actions</th>
+        </tr></thead>
+        <tbody>{''.join([table_rows]) if table_rows else '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--muted);font-size:.84rem">No requests yet.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <script>
+    async function updateCertStatus(id, status) {{
+      const res = await fetch('/admin/certifier-requests/' + id + '/status', {{
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{status}})
+      }});
+      if ((await res.json()).ok) location.reload();
+    }}
+    </script>"""
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='Certifier Requests', active='', body=body)
+
+
+@app.route('/admin/certifier-requests/<int:req_id>/status', methods=['POST'])
+def admin_certifier_status(req_id):
+    if get_logged_in_email() != ADMIN_EMAIL:
+        return jsonify({'ok': False}), 403
+    status = (request.get_json(force=True) or {}).get('status', '')
+    if status not in ('pending', 'approved', 'denied'):
+        return jsonify({'ok': False, 'error': 'Invalid status'}), 400
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE certifier_requests SET status = %s WHERE id = %s",
+                    (status, req_id)
+                )
+            conn.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 # ---------------------------------------------------------------------------
