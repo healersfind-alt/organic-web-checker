@@ -2677,7 +2677,6 @@ ACCOUNT_BODY = """
       <button onclick="acctDoLogout()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:8px 16px;color:var(--muted);font-size:.84rem;cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">Sign Out</button>
     </div>
 
-    {# ── API Keys ─────────────────────────────────────────────────────────── #}
     <div class="card" style="max-width:540px;margin:0 auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <div>
@@ -3120,6 +3119,7 @@ def create_checkout_session():
                 'quantity': 1,
             }],
             mode='payment',
+            allow_promotion_codes=True,
             client_reference_id=token,
             metadata={'tier_name': tier['name'], 'credits': str(tier['count'])},
             success_url=APP_BASE_URL + '/success?session_id={CHECKOUT_SESSION_ID}',
