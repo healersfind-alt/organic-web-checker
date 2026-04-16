@@ -36,6 +36,18 @@ _db_pub_url = os.environ.get('DATABASE_PUBLIC_URL', '')
 DATABASE_URL = _db_pub_url or _db_url
 APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebchecker.com')
 
+# SMTP — set these Railway env vars to enable password-reset emails:
+#   SMTP_HOST (default: smtp.gmail.com)
+#   SMTP_PORT (default: 587)
+#   SMTP_USER (your sending address)
+#   SMTP_PASS (app password or SMTP password)
+#   FROM_EMAIL (defaults to SMTP_USER)
+SMTP_HOST  = os.environ.get('SMTP_HOST',  'smtp.gmail.com')
+SMTP_PORT  = int(os.environ.get('SMTP_PORT', '587'))
+SMTP_USER  = os.environ.get('SMTP_USER',  '')
+SMTP_PASS  = os.environ.get('SMTP_PASS',  '')
+FROM_EMAIL = os.environ.get('FROM_EMAIL', SMTP_USER or 'hello@organicwebchecker.com')
+
 # ---------------------------------------------------------------------------
 # Postgres helpers
 # ---------------------------------------------------------------------------
@@ -95,6 +107,15 @@ def init_db():
                 )
             """)
             cur.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS promo_code TEXT")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    token      TEXT PRIMARY KEY,
+                    email      TEXT NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used       BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS certifier_requests (
                     id           SERIAL PRIMARY KEY,
@@ -1364,6 +1385,7 @@ document.addEventListener('click',()=>{const d=document.getElementById('hDd');if
       <label>Password</label>
       <input type="password" id="siPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doLogin()">
       <button onclick="doLogin()" class="btn-glass">Sign In</button>
+      <div style="text-align:right;margin-top:10px"><a href="/forgot-password" style="font-size:.78rem;color:var(--muted);text-decoration:none">Forgot password?</a></div>
     </div>
     <div id="authFormRegister" style="display:none">
       <label>Email</label>
@@ -2531,6 +2553,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <label>Password</label>
       <input type="password" id="siPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%;box-sizing:border-box;margin-bottom:14px" onkeydown="if(event.key==='Enter')doLogin()">
       <button onclick="doLogin()" class="btn-glass">Sign In</button>
+      <div style="text-align:right;margin-top:10px"><a href="/forgot-password" style="font-size:.78rem;color:var(--muted);text-decoration:none">Forgot password?</a></div>
     </div>
     <div id="authFormRegister" style="display:none">
       <label>Email</label>
@@ -2875,6 +2898,7 @@ ACCOUNT_BODY = """
         <label style="margin-top:10px">Password</label>
         <input type="password" id="acctSiPw" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onkeydown="if(event.key==='Enter')acctDoLogin()">
         <button onclick="acctDoLogin()" class="btn-glass" style="width:100%;margin-top:14px">Sign In</button>
+        <div style="text-align:right;margin-top:10px"><a href="/forgot-password" style="font-size:.78rem;color:var(--muted);text-decoration:none">Forgot password?</a></div>
       </div>
       <div id="acctFormRegister" style="display:none">
         <label>Email</label>
@@ -3502,6 +3526,290 @@ def api_user():
         'is_admin': is_admin(email),
         'credits': credits,
     })
+
+# ---------------------------------------------------------------------------
+# Password reset helpers + routes
+# ---------------------------------------------------------------------------
+
+def _send_reset_email(to_email: str, token: str) -> bool:
+    """Send password-reset email. Returns True on success. If SMTP is not
+    configured, prints the link to logs and returns False so the caller can
+    surface the link directly in the response."""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    reset_url = f"{APP_BASE_URL}/reset-password?token={token}"
+
+    if not SMTP_USER or not SMTP_PASS:
+        print(f'[RESET LINK — email not configured] {to_email}: {reset_url}')
+        return False
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'Reset your Organic Web Checker password'
+        msg['From']    = f'Organic Web Checker <{FROM_EMAIL}>'
+        msg['To']      = to_email
+
+        plain = (
+            f"Hi,\n\nYou requested a password reset for your Organic Web Checker account.\n\n"
+            f"Reset link (valid 1 hour):\n{reset_url}\n\n"
+            f"If you didn't request this, ignore this email.\n\n— Organic Web Checker"
+        )
+        html = f"""<html><body style="font-family:Inter,sans-serif;color:#0F172A;max-width:480px;margin:0 auto;padding:32px 20px">
+<img src="{APP_BASE_URL}/static/icon.png" width="60" alt="" style="margin-bottom:20px;border-radius:12px">
+<h2 style="color:#5B3DF6;font-size:1.2rem;margin-bottom:8px">Password Reset</h2>
+<p style="color:#64748B;font-size:.9rem;line-height:1.6;margin-bottom:24px">
+  You requested a password reset for your Organic Web Checker account.
+  Click the button below — the link expires in 1 hour.
+</p>
+<a href="{reset_url}" style="display:inline-block;background:#5B3DF6;color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-weight:700;font-size:.9rem">Reset Password</a>
+<p style="color:#94A3B8;font-size:.75rem;margin-top:28px">If you didn't request this, you can safely ignore this email.</p>
+</body></html>"""
+
+        msg.attach(MIMEText(plain, 'plain'))
+        msg.attach(MIMEText(html,  'html'))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(SMTP_USER, SMTP_PASS)
+            smtp.sendmail(FROM_EMAIL, to_email, msg.as_string())
+        return True
+    except Exception as exc:
+        print(f'[WARN] send_reset_email failed: {exc}')
+        return False
+
+
+@app.route('/forgot-password')
+def forgot_password_page():
+    body = """
+    <div style="max-width:420px;margin:60px auto;padding:0 20px">
+      <div class="page-title">Forgot Password</div>
+      <div class="page-subtitle">Enter your email address and we&rsquo;ll send you a reset link.</div>
+      <div class="card">
+        <div id="fpMsg" style="display:none" class="auth-msg"></div>
+        <label>Email</label>
+        <input type="email" id="fpEmail" placeholder="you@example.com"
+               onkeydown="if(event.key==='Enter')submitForgotPw()"
+               style="width:100%;box-sizing:border-box;margin-bottom:14px">
+        <button onclick="submitForgotPw()" class="btn-glass" id="fpBtn" style="width:100%">Send Reset Link</button>
+        <div style="text-align:center;margin-top:16px">
+          <a href="/account" style="font-size:.82rem;color:var(--primary);text-decoration:none">&larr; Back to sign in</a>
+        </div>
+      </div>
+    </div>
+    <script>
+    async function submitForgotPw() {
+      const email = document.getElementById('fpEmail').value.trim();
+      const msg   = document.getElementById('fpMsg');
+      const btn   = document.getElementById('fpBtn');
+      if (!email) {
+        msg.style.display=''; msg.className='auth-msg error';
+        msg.textContent='Please enter your email address.'; return;
+      }
+      btn.disabled = true; btn.textContent = 'Sending\u2026';
+      try {
+        const res  = await fetch('/api/forgot-password', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email})
+        });
+        const data = await res.json();
+        msg.style.display = '';
+        if (data.ok) {
+          msg.className   = 'auth-msg success';
+          msg.innerHTML   = data.message;
+          btn.style.display = 'none';
+          document.getElementById('fpEmail').value = '';
+        } else {
+          msg.className = 'auth-msg error';
+          msg.textContent = data.error || 'Request failed — please try again.';
+          btn.disabled = false; btn.textContent = 'Send Reset Link';
+        }
+      } catch(e) {
+        msg.style.display=''; msg.className='auth-msg error';
+        msg.textContent='Network error \u2014 please try again.';
+        btn.disabled = false; btn.textContent = 'Send Reset Link';
+      }
+    }
+    </script>"""
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='Forgot Password', active='', body=body)
+
+
+@app.route('/api/forgot-password', methods=['POST'])
+def api_forgot_password():
+    import html as _html
+    data  = request.get_json(force=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email or '@' not in email:
+        return jsonify({'ok': False, 'error': 'Please enter a valid email address.'}), 400
+
+    # Always respond with the same success message to prevent email enumeration
+    generic_ok = {'ok': True,
+                  'message': 'If that email is registered, a reset link is on its way. Check your inbox (and spam folder).'}
+
+    if not DATABASE_URL:
+        return jsonify(generic_ok)
+
+    # Check the user exists
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT email FROM users WHERE email = %s', (email,))
+                row = cur.fetchone()
+        if not row:
+            return jsonify(generic_ok)  # user not found — don't reveal this
+
+        # Delete any existing unused tokens for this email, then create a new one
+        token = secrets.token_urlsafe(32)
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM password_resets WHERE email = %s AND used = FALSE",
+                    (email,)
+                )
+                cur.execute("""
+                    INSERT INTO password_resets (token, email, expires_at)
+                    VALUES (%s, %s, NOW() + INTERVAL '1 hour')
+                """, (token, email))
+            conn.commit()
+    except Exception as exc:
+        print(f'[WARN] api_forgot_password DB error: {exc}')
+        return jsonify(generic_ok)
+
+    sent = _send_reset_email(email, token)
+    if not sent:
+        # SMTP not configured — surface the link directly (useful in dev / when
+        # email is not yet set up, so the admin can copy-paste and send manually)
+        reset_url = f"{APP_BASE_URL}/reset-password?token={token}"
+        safe_url  = _html.escape(reset_url)
+        return jsonify({
+            'ok': True,
+            'message': (
+                'Email is not configured on this server. '
+                f'Your reset link (copy and share manually): '
+                f'<a href="{safe_url}" style="word-break:break-all;color:var(--primary)">{safe_url}</a>'
+            )
+        })
+
+    return jsonify(generic_ok)
+
+
+@app.route('/reset-password')
+def reset_password_page():
+    import html as _html
+    token = request.args.get('token', '').strip()
+    if not token:
+        from flask import redirect
+        return redirect('/forgot-password')
+
+    # Validate token exists and isn't expired (don't reveal status in URL — let
+    # the JS call handle the error message after form submission)
+    safe_token = _html.escape(token)
+    body = f"""
+    <div style="max-width:420px;margin:60px auto;padding:0 20px">
+      <div class="page-title">Reset Password</div>
+      <div class="page-subtitle">Enter your new password below.</div>
+      <div class="card">
+        <div id="rpMsg" style="display:none" class="auth-msg"></div>
+        <label>New password</label>
+        <input type="password" id="rpPw" placeholder="At least 8 characters"
+               style="width:100%;box-sizing:border-box;margin-bottom:10px">
+        <label>Confirm password</label>
+        <input type="password" id="rpPw2" placeholder="Repeat password"
+               style="width:100%;box-sizing:border-box;margin-bottom:14px"
+               onkeydown="if(event.key==='Enter')submitResetPw()">
+        <button onclick="submitResetPw()" class="btn-glass" id="rpBtn" style="width:100%">Set New Password</button>
+      </div>
+    </div>
+    <script>
+    async function submitResetPw() {{
+      const pw  = document.getElementById('rpPw').value;
+      const pw2 = document.getElementById('rpPw2').value;
+      const msg = document.getElementById('rpMsg');
+      const btn = document.getElementById('rpBtn');
+      msg.style.display = '';
+      if (!pw) {{
+        msg.className = 'auth-msg error'; msg.textContent = 'Please enter a new password.'; return;
+      }}
+      if (pw.length < 8) {{
+        msg.className = 'auth-msg error'; msg.textContent = 'Password must be at least 8 characters.'; return;
+      }}
+      if (pw !== pw2) {{
+        msg.className = 'auth-msg error'; msg.textContent = 'Passwords do not match.'; return;
+      }}
+      btn.disabled = true; btn.textContent = 'Saving\u2026';
+      try {{
+        const res  = await fetch('/api/reset-password', {{
+          method: 'POST', headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{token: '{safe_token}', password: pw}})
+        }});
+        const data = await res.json();
+        msg.style.display = '';
+        if (data.ok) {{
+          msg.className   = 'auth-msg success';
+          msg.innerHTML   = 'Password updated! <a href="/account" style="color:var(--primary)">Sign in &rarr;</a>';
+          btn.style.display = 'none';
+        }} else {{
+          msg.className   = 'auth-msg error';
+          msg.textContent = data.error || 'Reset failed \u2014 the link may have expired.';
+          btn.disabled = false; btn.textContent = 'Set New Password';
+        }}
+      }} catch(e) {{
+        msg.className = 'auth-msg error'; msg.textContent = 'Network error \u2014 please try again.';
+        btn.disabled = false; btn.textContent = 'Set New Password';
+      }}
+    }}
+    </script>"""
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='Reset Password', active='', body=body)
+
+
+@app.route('/api/reset-password', methods=['POST'])
+def api_reset_password():
+    data     = request.get_json(force=True) or {}
+    token    = (data.get('token')    or '').strip()
+    password = (data.get('password') or '')
+    if not token or not password:
+        return jsonify({'ok': False, 'error': 'Missing token or password.'}), 400
+    if len(password) < 8:
+        return jsonify({'ok': False, 'error': 'Password must be at least 8 characters.'}), 400
+    if not DATABASE_URL:
+        return jsonify({'ok': False, 'error': 'Service temporarily unavailable.'}), 503
+
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT email FROM password_resets
+                    WHERE token = %s AND used = FALSE AND expires_at > NOW()
+                """, (token,))
+                row = cur.fetchone()
+            if not row:
+                return jsonify({'ok': False,
+                                'error': 'This reset link is invalid or has expired. '
+                                         'Please request a new one.'}), 400
+
+            email     = row[0]
+            new_hash  = generate_password_hash(password)
+            with conn.cursor() as cur:
+                cur.execute(
+                    'UPDATE users SET password_hash = %s WHERE email = %s',
+                    (new_hash, email)
+                )
+                cur.execute(
+                    'UPDATE password_resets SET used = TRUE WHERE token = %s',
+                    (token,)
+                )
+            conn.commit()
+
+        print(f'[PASSWORD RESET] {email}')
+        return jsonify({'ok': True})
+    except Exception as exc:
+        print(f'[WARN] api_reset_password error: {exc}')
+        return jsonify({'ok': False, 'error': 'Server error — please try again.'}), 500
+
 
 @app.route('/register', methods=['POST'])
 def register():
