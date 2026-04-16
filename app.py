@@ -3178,16 +3178,20 @@ ABOUT_BODY = """
     scope &mdash; even unintentionally &mdash; can constitute misrepresentation under 7 CFR &sect;&nbsp;205.307.
   </div>
   <div class="about-p">
-    <strong>Brand owners and producers</strong> (scope: CROPS or LIVESTOCK) typically have specific product names listed
-    on their OID certificate. Organic Web Checker compares website claims directly against those listed products.
+    <strong>Certified producers</strong> (CROPS or LIVESTOCK scope) are operations that grow or raise organic
+    products &mdash; farms, ranches, and growers. Their OID certificate lists the specific crops or livestock
+    products they are certified to produce. Organic Web Checker compares website claims directly against
+    those listed products.
   </div>
   <div class="about-p">
-    <strong>Handlers, brokers, distributors, and importers</strong> (scope: HANDLING) are certified for their activity
-    &mdash; not a specific product list. Under the Strengthening Organic Enforcement rule (eff. March&nbsp;19,&nbsp;2024),
-    all brokers, traders, and importers must hold organic handler certification. Their certificates often list products
-    at a general category level (e.g., &ldquo;Organic Eggs,&rdquo; &ldquo;Wine&rdquo;); the specific products and supplier
-    certifications are documented in their <strong>Organic System Plan (OSP)</strong> held by their certifying agent
-    &mdash; not publicly visible in the OID.
+    <strong>Certified handlers</strong> (HANDLING scope) are any operations that process, package, store,
+    distribute, or market organic products &mdash; including <strong>brand owners</strong> who sell products
+    under their own label. Under USDA NOP (7&nbsp;CFR&nbsp;&sect;&nbsp;205.101) and the
+    Strengthening Organic Enforcement rule (eff.&nbsp;March&nbsp;19,&nbsp;2024), all entities that make or use
+    an organic claim &mdash; including brand owners who source from upstream certified suppliers rather than
+    producing themselves &mdash; must hold organic handler certification. Their OID certificate typically lists
+    authorized product categories; the full product and supplier detail is documented in their
+    <strong>Organic System Plan (OSP)</strong> on file with their certifying agent, not publicly visible in the OID.
   </div>
   <div class="about-p" style="font-size:.8rem;color:var(--muted)">
     When Organic Web Checker detects a HANDLING scope operation, flagged items are labeled for upstream supplier
