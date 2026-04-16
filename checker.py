@@ -817,6 +817,81 @@ def print_report(report: dict):
 
 
 # ---------------------------------------------------------------------------
+# Certifying agent verification
+# ---------------------------------------------------------------------------
+
+def verify_certifying_agent(org_name: str) -> str:
+    """
+    Verify that org_name is a USDA-accredited certifying agent by searching
+    the OID Certifiers directory.
+
+    Returns:
+      'verified'  — org found in the USDA certifier directory
+      'not_found' — page loaded but org name not present
+      'error'     — Playwright/network failure; fall back to manual review
+    """
+    # Normalise: strip legal suffixes (same helper used for operation search)
+    clean = _clean_oid_search(org_name).strip()
+
+    def _norm(s: str) -> str:
+        return re.sub(r'[^a-z0-9]', '', s.lower())
+
+    try:
+        with sync_playwright() as p:
+            browser = p.firefox.launch(headless=True)
+            page    = browser.new_page()
+
+            page.goto(
+                "https://organic.ams.usda.gov/integrity/Certifiers/CertifiersLocationsSearchPage",
+                wait_until="domcontentloaded",
+                timeout=90000,
+            )
+            time.sleep(10)   # allow Blazor/SignalR to initialise
+
+            # Try to find the certifier-name search field and type the org name.
+            # The certifiers page uses the same Telerik grid pattern as operations;
+            # the input ID is not publicly documented so we try common names.
+            filled = False
+            for sel in [
+                '#certifier', '#certifierName', '#name', '#certName',
+                'input[placeholder*="certif" i]', 'input[placeholder*="name" i]',
+                'input[type="text"]', 'input[type="search"]',
+            ]:
+                try:
+                    el = page.locator(sel).first
+                    if el.count() > 0 and el.is_visible(timeout=3000):
+                        el.click()
+                        page.keyboard.type(clean, delay=100)
+                        time.sleep(1)
+                        page.keyboard.press("Tab")
+                        time.sleep(6)   # wait for Telerik grid to update
+                        filled = True
+                        break
+                except Exception:
+                    continue
+
+            body_text = page.inner_text("body")
+            browser.close()
+
+        # ── Match check ───────────────────────────────────────────────────────
+        # Exact normalised match
+        if _norm(clean) in _norm(body_text):
+            return 'verified'
+
+        # Partial match: all significant words (>3 chars) from the org name
+        # must appear in the page body (handles minor punctuation differences)
+        words = [w for w in clean.lower().split() if len(w) > 3]
+        if len(words) >= 2 and all(w in body_text.lower() for w in words):
+            return 'verified'
+
+        return 'not_found' if filled else 'error'
+
+    except Exception as exc:
+        print(f'[WARN] verify_certifying_agent failed: {exc}')
+        return 'error'
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 

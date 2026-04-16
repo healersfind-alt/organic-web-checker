@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from flask import Flask, request, render_template_string, send_from_directory, jsonify, Response, session
 from werkzeug.security import generate_password_hash, check_password_hash
-from checker import run_check, get_oid_cert, _clean_oid_search
+from checker import run_check, get_oid_cert, _clean_oid_search, verify_certifying_agent
 import stripe
 import psycopg2
 
@@ -332,8 +332,39 @@ jobs = {}
 jobs_lock = threading.Lock()
 _check_semaphore = threading.Semaphore(1)
 
+# Certifier verification background jobs (in-memory; cleared on restart)
+_cert_verify_jobs  = {}
+_cert_verify_lock  = threading.Lock()
+# Separate semaphore so certifier checks don't queue behind long compliance checks
+_cert_semaphore    = threading.Semaphore(1)
+
 # In-memory session stats (resets on redeploy; persistent DB coming with Stripe)
 stats = {'checks_run': 0, 'flags_found': 0, 'caution_found': 0}
+
+
+def _run_cert_verify(request_id: str, org_name: str, db_id: int):
+    """Background thread: verify certifying agent via USDA OID, update DB."""
+    with _cert_semaphore:
+        result = verify_certifying_agent(org_name)
+
+    db_status = 'approved' if result == 'verified' else 'pending'
+    with _cert_verify_lock:
+        if request_id in _cert_verify_jobs:
+            _cert_verify_jobs[request_id]['status'] = result
+
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE certifier_requests SET status = %s WHERE id = %s",
+                        (db_status, db_id)
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f'[WARN] cert verify DB update failed: {e}')
+
+    print(f'[CERT VERIFY] {org_name} → {result} (db_id={db_id})')
 
 
 def _run_job(job_id: str, operation: str, website: str, use_cache: bool = False):
@@ -2738,23 +2769,61 @@ def pricing_page_html():
         msg.style.display = 'block'; msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
         msg.textContent = 'Please fill in all fields.'; return;
       }}
+      // Disable submit button while verifying
+      const submitBtn = document.querySelector('#certModal .btn-glass');
+      if (submitBtn) {{ submitBtn.disabled = true; submitBtn.textContent = 'Verifying\u2026'; }}
+      msg.style.display = 'block'; msg.style.background = '#EFF6FF'; msg.style.color = '#1D4ED8';
+      msg.innerHTML = '\u23f3 Verifying your NOP number with USDA\u2014this takes up to 30 seconds\u2026';
       try {{
         const res  = await fetch('/api/certifier-request', {{
           method: 'POST', headers: {{'Content-Type': 'application/json'}},
           body: JSON.stringify({{first_name: first, last_name: last, organization: org, nop_number: nop, email}})
         }});
         const data = await res.json();
-        if (data.ok) {{
-          msg.style.display = 'block'; msg.style.background = '#F0FDF4'; msg.style.color = '#15803D';
-          msg.textContent = 'Request submitted! We\u2019ll review your NOP number and email your code within 1 business day.';
-          document.querySelectorAll('#certFirst,#certLast,#certOrg,#certNOP,#certEmail').forEach(function(el) {{ el.value = ''; }});
-        }} else {{
-          msg.style.display = 'block'; msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
+        if (!data.ok) {{
+          msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
           msg.textContent = data.error || 'Submission failed. Please try again.';
+          if (submitBtn) {{ submitBtn.disabled = false; submitBtn.textContent = 'Submit Verification Request'; }}
+          return;
         }}
+        // Poll for verification result
+        let attempts = 0;
+        const poll = setInterval(async function() {{
+          attempts++;
+          if (attempts > 20) {{  // 60s timeout
+            clearInterval(poll);
+            msg.style.background = '#FEF3C7'; msg.style.color = '#92400E';
+            msg.textContent = 'Verification is taking longer than expected \u2014 we\u2019ll review your request manually and email your code within 1 business day.';
+            if (submitBtn) {{ submitBtn.disabled = false; submitBtn.textContent = 'Submit Verification Request'; }}
+            return;
+          }}
+          try {{
+            const sr   = await fetch('/api/certifier-verify-status/' + data.request_id);
+            const sd   = await sr.json();
+            if (sd.status === 'verified') {{
+              clearInterval(poll);
+              msg.style.background = '#F0FDF4'; msg.style.color = '#15803D';
+              msg.innerHTML = '\u2705 Verified! Your discount code is: <strong style="font-family:monospace;font-size:1.05rem;background:#DCFCE7;padding:2px 8px;border-radius:4px">CERTIFIER50</strong><br><span style="font-size:.8rem;color:var(--muted)">Enter this at checkout for 50% off any tier.</span>';
+              document.querySelectorAll('#certFirst,#certLast,#certOrg,#certNOP,#certEmail').forEach(function(el) {{ el.value = ''; }});
+              if (submitBtn) {{ submitBtn.style.display = 'none'; }}
+            }} else if (sd.status === 'not_found') {{
+              clearInterval(poll);
+              msg.style.background = '#FEF3C7'; msg.style.color = '#92400E';
+              msg.textContent = 'We couldn\u2019t automatically match your organization in the USDA certifier directory. We\u2019ll review your NOP number manually and email your code within 1 business day.';
+              if (submitBtn) {{ submitBtn.disabled = false; submitBtn.textContent = 'Submit Verification Request'; }}
+            }} else if (sd.status === 'error') {{
+              clearInterval(poll);
+              msg.style.background = '#FEF3C7'; msg.style.color = '#92400E';
+              msg.textContent = 'USDA verification service is temporarily unavailable. Your request was saved \u2014 we\u2019ll verify manually and email your code within 1 business day.';
+              if (submitBtn) {{ submitBtn.disabled = false; submitBtn.textContent = 'Submit Verification Request'; }}
+            }}
+            // else still 'verifying' — keep polling
+          }} catch(e) {{ /* network hiccup, keep polling */ }}
+        }}, 3000);
       }} catch(e) {{
-        msg.style.display = 'block'; msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
+        msg.style.background = '#FEE2E2'; msg.style.color = '#B91C1C';
         msg.textContent = 'Network error \u2014 please try again.';
+        if (submitBtn) {{ submitBtn.disabled = false; submitBtn.textContent = 'Submit Verification Request'; }}
       }}
     }}
 
@@ -3880,12 +3949,12 @@ def about():
 
 @app.route('/api/certifier-request', methods=['POST'])
 def certifier_request():
-    data       = request.get_json(force=True) or {}
-    first_name = (data.get('first_name') or '').strip()[:80]
-    last_name  = (data.get('last_name')  or '').strip()[:80]
+    data         = request.get_json(force=True) or {}
+    first_name   = (data.get('first_name')   or '').strip()[:80]
+    last_name    = (data.get('last_name')    or '').strip()[:80]
     organization = (data.get('organization') or '').strip()[:200]
-    nop_number = (data.get('nop_number')  or '').strip()[:100]
-    email      = (data.get('email')       or '').strip()[:200]
+    nop_number   = (data.get('nop_number')   or '').strip()[:100]
+    email        = (data.get('email')        or '').strip()[:200]
     if not all([first_name, last_name, organization, nop_number, email]):
         return jsonify({'ok': False, 'error': 'All fields are required.'}), 400
     if '@' not in email:
@@ -3897,15 +3966,37 @@ def certifier_request():
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO certifier_requests
-                        (first_name, last_name, organization, nop_number, email)
-                    VALUES (%s, %s, %s, %s, %s)
+                        (first_name, last_name, organization, nop_number, email, status)
+                    VALUES (%s, %s, %s, %s, %s, 'verifying')
+                    RETURNING id
                 """, (first_name, last_name, organization, nop_number, email))
+                db_id = cur.fetchone()[0]
             conn.commit()
-        print(f'[CERTIFIER REQUEST] {first_name} {last_name} | {organization} | NOP: {nop_number} | {email}')
-        return jsonify({'ok': True})
     except Exception as e:
         print(f'[WARN] certifier_request DB write failed: {e}')
         return jsonify({'ok': False, 'error': 'Could not save request. Please try again.'}), 500
+
+    # Start background USDA verification
+    request_id = uuid.uuid4().hex[:12]
+    with _cert_verify_lock:
+        _cert_verify_jobs[request_id] = {'status': 'verifying'}
+    threading.Thread(
+        target=_run_cert_verify,
+        args=(request_id, organization, db_id),
+        daemon=True
+    ).start()
+
+    print(f'[CERTIFIER REQUEST] {first_name} {last_name} | {organization} | NOP: {nop_number} | {email}')
+    return jsonify({'ok': True, 'request_id': request_id})
+
+
+@app.route('/api/certifier-verify-status/<request_id>')
+def certifier_verify_status(request_id):
+    with _cert_verify_lock:
+        job = _cert_verify_jobs.get(request_id)
+    if not job:
+        return jsonify({'status': 'unknown'}), 404
+    return jsonify({'status': job['status']})
 
 
 @app.route('/admin/certifier-requests')
