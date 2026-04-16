@@ -74,6 +74,7 @@ def init_db():
                     tier_name         TEXT,
                     credits_purchased INTEGER NOT NULL,
                     amount_paid_cents INTEGER NOT NULL,
+                    promo_code        TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
@@ -93,6 +94,7 @@ def init_db():
                     cached_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS promo_code TEXT")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
                     key_id       TEXT PRIMARY KEY,
@@ -1229,6 +1231,13 @@ GLOBAL_CSS = """
     transform: translateY(-1px);
   }
   .btn-glass:active { transform: translateY(0); }
+
+  /* ── Volume Calculator ───────────────────────────────────────────────── */
+  .calc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .calc-box  { background: var(--lavender); border-radius: 10px; padding: 12px 16px; }
+  .calc-lbl  { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
+  .calc-val  { font-size: .9rem; font-weight: 800; color: var(--text); }
+  .calc-sub  { font-size: .72rem; color: var(--muted); margin-top: 2px; }
 """
 
 
@@ -2578,32 +2587,117 @@ def pricing_page_html():
         </div>"""
 
     custom = """
-        <div class="pricing-card">
+        <div class="pricing-card" style="border-color:rgba(20,184,166,.35);background:linear-gradient(135deg,rgba(20,184,166,.04) 0%,transparent 100%)">
           <div class="pricing-icon-row">
             <img src="/static/icon.png" class="pricing-icon" alt="">
-            <div class="pricing-mult" style="color:var(--cyan);text-shadow:0 0 14px rgba(0,229,204,.4)">CA</div>
+            <div class="pricing-mult" style="color:var(--cyan);text-shadow:0 0 14px rgba(20,184,166,.3)">CA</div>
           </div>
           <div class="pricing-tier-name">Certifying Agents</div>
-          <div class="pricing-price" style="font-size:1.4rem;color:var(--cyan)">$25 / client</div>
-          <div class="pricing-per">Flat rate &mdash; no volume discount</div>
-          <div class="pricing-disc" style="color:var(--cyan)">Bake it into your cert fees</div>
-          <div class="pricing-desc">USDA-accredited certifying agents pay the standard $25/check per client, regardless of roster size. Run desk-review compliance checks before sending inspectors. Contact us to set up a certifier account.</div>
-          <a href="mailto:hello@organicwebchecker.com" class="pricing-cta contact">Contact Us</a>
+          <div style="display:inline-block;background:rgba(20,184,166,.12);border:1px solid rgba(20,184,166,.35);border-radius:6px;padding:5px 11px;font-size:.78rem;font-weight:800;color:var(--cyan);letter-spacing:.06em;margin-bottom:10px;font-family:monospace">CERTIFIER50</div>
+          <div class="pricing-price" style="font-size:1.7rem;color:var(--cyan)">50% off</div>
+          <div class="pricing-per">any tier &mdash; from $12.50/check</div>
+          <div class="pricing-disc" style="color:var(--cyan)">Enter code at checkout</div>
+          <div class="pricing-desc">USDA-accredited certifying agents get 50% off any package. Run desk-review compliance checks before sending inspectors &mdash; bake it into your cert fees. Choose any tier above and enter the promo code at checkout.</div>
+          <button onclick="showCertPromo()" class="pricing-cta" style="background:transparent;border:2px solid var(--cyan);color:var(--cyan)">Get 50% Off &rarr;</button>
         </div>"""
 
+    # Build the JS tier array without needing f-string brace escaping inside
+    calc_tiers_js = "const CALC_TIERS=[" + ",".join(
+        f"{{count:{t['count']},price:{t['price']},per:{t['per']},name:'{t['name']}',idx:{i}}}"
+        for i, t in enumerate(TIERS)
+    ) + "];"
+
     return f"""
+    <div id="cert-promo-banner" style="display:none;background:rgba(20,184,166,.08);border:1px solid rgba(20,184,166,.35);border-radius:12px;padding:14px 22px;margin-bottom:22px;text-align:center;font-size:.88rem;color:var(--cyan);font-weight:600">
+      Certifying agent discount &mdash; use code <code style="background:rgba(20,184,166,.18);padding:2px 9px;border-radius:5px;font-size:.84rem">CERTIFIER50</code> at checkout for 50% off any tier &mdash; from $12.50/check
+      <button onclick="document.getElementById('cert-promo-banner').style.display='none'" style="background:none;border:none;color:var(--cyan);font-size:.95rem;cursor:pointer;margin-left:10px;opacity:.7">&times;</button>
+    </div>
     <div class="pricing-intro">
       <img src="/static/icon.png" class="pricing-big-icon" alt="Organic Web Checker">
       <div class="pricing-intro-text">
         <h2>One checker. One compliance review.</h2>
-        <p>Each checker runs a live comparison of a website against a live USDA Organic Integrity Database certificate &mdash; flagging products marketed as organic that may not be authorized on the cert. $25 per check. Volume packs available for operations. Credits never expire.</p>
+        <p>Each checker runs a live comparison of a website against a live USDA Organic Integrity Database certificate &mdash; flagging products marketed as organic that may not be authorized on the cert. $25 per check. Volume packs available. Credits never expire.</p>
       </div>
     </div>
-    <div class="pricing-grid">
+    <div id="pricing-grid" class="pricing-grid">
       {cards}
       {custom}
     </div>
+
+    <div class="card" style="max-width:680px;margin:32px auto 0">
+      <div style="font-size:1rem;font-weight:800;color:var(--text);margin-bottom:4px">Volume Calculator</div>
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:20px">Estimate how many checks you need &mdash; we&rsquo;ll recommend the right tier.</div>
+      <div style="display:flex;gap:14px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <label style="font-size:.82rem;font-weight:600;color:var(--muted);white-space:nowrap">Checks needed:</label>
+        <input type="range" id="calcSlider" min="1" max="200" value="10" oninput="syncCalc('slider')" style="flex:1;min-width:120px;accent-color:var(--primary)">
+        <input type="number" id="calcNumber" min="1" max="500" value="10" oninput="syncCalc('number')" style="width:80px;text-align:center;font-weight:700;font-size:.95rem;padding:6px;border:1px solid var(--border);border-radius:8px">
+      </div>
+      <div id="calcResult"></div>
+    </div>
+
+    <div class="card" style="max-width:680px;margin:22px auto 0;background:#FFFBEB;border-color:#FDE68A">
+      <div style="font-size:.9rem;font-weight:800;color:#92400E;margin-bottom:10px">Refund Policy</div>
+      <div style="font-size:.8rem;color:#78350F;line-height:1.75">
+        <strong>Single checks</strong> &mdash; Non-refundable once the check has been initiated.<br>
+        <strong>Volume packs</strong> &mdash; Non-refundable after any check in the bundle has been run. If you purchase a pack and use zero credits, contact us within 7 days for a refund.<br>
+        <strong>No partial refunds on partially-used bundles</strong> &mdash; Volume pricing reflects a commitment to the quantity purchased. The per-check discount is earned by purchasing that volume, not by using it. Refunds are not issued for unused credits in a partially-used pack.<br>
+        <span style="color:#92400E;opacity:.75">Questions? <a href="mailto:hello@organicwebchecker.com" style="color:#92400E">hello@organicwebchecker.com</a></span>
+      </div>
+    </div>
+
     <script>
+    {calc_tiers_js}
+    const CALC_FLOOR = 12.00;
+
+    function syncCalc(src) {{
+      const slider = document.getElementById('calcSlider');
+      const number = document.getElementById('calcNumber');
+      let v = parseInt(src === 'slider' ? slider.value : number.value) || 1;
+      v = Math.max(1, Math.min(v, 500));
+      slider.value = Math.min(v, 200);
+      number.value = v;
+      renderCalc(v);
+    }}
+
+    function renderCalc(qty) {{
+      let tier = CALC_TIERS.find(function(t) {{ return t.count >= qty; }});
+      let tierName, tierCount, tierPrice, perCheck, extra, tierIdx;
+      if (tier) {{
+        perCheck  = Math.max(CALC_FLOOR, tier.per);
+        extra     = tier.count - qty;
+        tierName  = tier.name;
+        tierCount = tier.count;
+        tierPrice = tier.price;
+        tierIdx   = tier.idx;
+      }} else {{
+        const packs = Math.ceil(qty / 100);
+        tierName  = packs + '\u00d7 High Volume';
+        tierCount = packs * 100;
+        tierPrice = packs * 1500;
+        perCheck  = 15.00;
+        extra     = packs * 100 - qty;
+        tierIdx   = 4;
+      }}
+      let html = '<div class="calc-grid">';
+      html += '<div class="calc-box"><div class="calc-lbl">Tier</div><div class="calc-val">' + tierName + '</div><div class="calc-sub">' + tierCount + ' credits</div></div>';
+      html += '<div class="calc-box"><div class="calc-lbl">Total price</div><div class="calc-val">$' + tierPrice.toLocaleString() + '</div></div>';
+      html += '<div class="calc-box"><div class="calc-lbl">Per check</div><div class="calc-val" style="color:var(--primary)">$' + perCheck.toFixed(2) + '</div></div>';
+      if (extra > 0) {{
+        html += '<div class="calc-box"><div class="calc-lbl">Leftover</div><div class="calc-val" style="color:var(--neon)">' + extra + ' credits</div><div class="calc-sub">never expire</div></div>';
+      }}
+      html += '</div>';
+      if (qty > 100) {{
+        html += '<div style="font-size:.75rem;color:var(--muted);margin-bottom:12px">For &gt;100 checks, purchase multiple High Volume packs. Need a custom enterprise plan? <a href="mailto:hello@organicwebchecker.com" style="color:var(--primary)">Contact us</a>.</div>';
+      }}
+      html += '<button onclick="buyTier(' + tierIdx + ')" class="pricing-cta" style="width:100%">Buy ' + tierName + ' \u2192</button>';
+      document.getElementById('calcResult').innerHTML = html;
+    }}
+
+    function showCertPromo() {{
+      document.getElementById('cert-promo-banner').style.display = 'block';
+      window.scrollTo({{top: 0, behavior: 'smooth'}});
+    }}
+
     async function buyTier(i) {{
       const btn = document.getElementById('buy-' + i);
       if (btn) {{ btn.textContent = 'Redirecting\u2026'; btn.style.opacity = '0.7'; btn.style.pointerEvents = 'none'; }}
@@ -2621,11 +2715,13 @@ def pricing_page_html():
           if (btn) {{ btn.textContent = 'Purchase'; btn.style.opacity = ''; btn.style.pointerEvents = ''; }}
         }}
       }} catch(e) {{
-        alert('Network error — please try again.');
+        alert('Network error \u2014 please try again.');
         if (btn) {{ btn.textContent = 'Purchase'; btn.style.opacity = ''; btn.style.pointerEvents = ''; }}
       }}
       return false;
     }}
+
+    renderCalc(10);
     </script>"""
 
 
@@ -3146,6 +3242,15 @@ def stripe_webhook():
         tier_name         = obj.get('metadata', {}).get('tier_name', '')
         stripe_session_id = obj['id']
         amount_cents      = obj.get('amount_total', 0)
+        # Extract promo code if one was applied
+        promo_code = None
+        discounts = obj.get('discounts') or []
+        if discounts and discounts[0].get('promotion_code'):
+            try:
+                pc = stripe.PromotionCode.retrieve(discounts[0]['promotion_code'])
+                promo_code = pc.get('code')
+            except Exception:
+                pass
         if ref and credits > 0 and DATABASE_URL:
             try:
                 with db_conn() as conn:
@@ -3168,10 +3273,10 @@ def stripe_webhook():
                                     total_purchased   = credit_accounts.total_purchased   + EXCLUDED.total_purchased
                             """, (ref, credits, credits))
                         cur.execute("""
-                            INSERT INTO purchases (token, stripe_session_id, tier_name, credits_purchased, amount_paid_cents)
-                            VALUES (%s, %s, %s, %s, %s)
+                            INSERT INTO purchases (token, stripe_session_id, tier_name, credits_purchased, amount_paid_cents, promo_code)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                             ON CONFLICT (stripe_session_id) DO NOTHING
-                        """, (ref, stripe_session_id, tier_name, credits, amount_cents))
+                        """, (ref, stripe_session_id, tier_name, credits, amount_cents, promo_code))
                     conn.commit()
             except Exception as e:
                 print(f'[WARN] Webhook DB write failed: {e}')
@@ -3350,8 +3455,11 @@ def success():
   <div style="color:var(--text);font-size:1.05rem;margin-bottom:6px">
     {f'<strong>{credits} checker{"s" if credits != 1 else ""}</strong> ({tier_name}) added to your account.' if credits else 'Your purchase was successful.'}
   </div>
-  <div style="color:var(--muted);font-size:.82rem;margin-bottom:32px">
-    Credits are tied to this browser. Sign in with an account (coming soon) to access them anywhere.
+  <div style="color:var(--muted);font-size:.82rem;margin-bottom:16px">
+    Credits are tied to your account and never expire.
+  </div>
+  <div style="font-size:.76rem;color:var(--muted);max-width:420px;margin:0 auto 32px;padding:12px 16px;background:var(--lavender);border-radius:10px;line-height:1.6">
+    <strong style="color:var(--text)">Refund policy:</strong> Credits are non-refundable once any check has been run against your purchase. Unused packs may be refunded within 7 days if zero credits have been used &mdash; email <a href="mailto:hello@organicwebchecker.com" style="color:var(--primary)">hello@organicwebchecker.com</a>.
   </div>
   <a href="/" class="cta-btn">Run a Checker &rarr;</a>
 </div>"""
