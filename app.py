@@ -8,8 +8,10 @@ import hashlib
 import secrets
 import threading
 import json
+import time
+import requests as req_http
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request, render_template_string, send_from_directory, jsonify, Response, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from checker import run_check, get_oid_cert, _clean_oid_search, verify_certifying_agent
@@ -46,7 +48,8 @@ SMTP_HOST  = os.environ.get('SMTP_HOST',  'smtp.gmail.com')
 SMTP_PORT  = int(os.environ.get('SMTP_PORT', '587'))
 SMTP_USER  = os.environ.get('SMTP_USER',  '')
 SMTP_PASS  = os.environ.get('SMTP_PASS',  '')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', SMTP_USER or 'hello@organicwebchecker.com')
+FROM_EMAIL     = os.environ.get('FROM_EMAIL', SMTP_USER or 'hello@organicwebchecker.com')
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 
 # ---------------------------------------------------------------------------
 # Postgres helpers
@@ -137,6 +140,24 @@ def init_db():
                     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     last_used_at TIMESTAMPTZ
                 )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_checks (
+                    id             TEXT PRIMARY KEY,
+                    user_email     TEXT NOT NULL,
+                    operation_name TEXT NOT NULL,
+                    website_url    TEXT NOT NULL,
+                    scheduled_at   TIMESTAMPTZ NOT NULL,
+                    status         TEXT NOT NULL DEFAULT 'scheduled',
+                    job_id         TEXT,
+                    report         JSONB,
+                    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_scheduled_active_slot
+                ON scheduled_checks (scheduled_at)
+                WHERE status NOT IN ('cancelled')
             """)
         conn.commit()
 
@@ -335,6 +356,136 @@ def deduct_user_credit(email):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Scheduled checker — slot helpers
+# ---------------------------------------------------------------------------
+
+def _snap_to_slot(dt: datetime) -> datetime:
+    """Round a datetime UP to the next 10-minute aligned UTC slot."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if dt.second > 0 or dt.microsecond > 0:
+        dt = dt.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    else:
+        dt = dt.replace(second=0, microsecond=0)
+    rem = dt.minute % 10
+    if rem == 0:
+        return dt
+    return dt + timedelta(minutes=(10 - rem))
+
+
+def get_booked_slots_for_day(date_str: str) -> list:
+    """Return list of ISO UTC strings of booked/running slots for a given date (YYYY-MM-DD)."""
+    if not DATABASE_URL:
+        return []
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT scheduled_at FROM scheduled_checks
+                       WHERE DATE(scheduled_at AT TIME ZONE 'UTC') = %s::date
+                       AND status NOT IN ('cancelled')""",
+                    (date_str,)
+                )
+                rows = cur.fetchall()
+        return [r[0].strftime('%Y-%m-%dT%H:%M:00Z') for r in rows]
+    except Exception as e:
+        print(f'[SCHED] get_booked_slots error: {e}')
+        return []
+
+
+def get_next_available_slot() -> datetime | None:
+    """Return the next available 10-min slot starting >= now + 5 minutes."""
+    now   = datetime.now(timezone.utc)
+    start = _snap_to_slot(now + timedelta(minutes=5))
+    end   = now + timedelta(days=7)
+    booked = set()
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """SELECT scheduled_at FROM scheduled_checks
+                           WHERE scheduled_at BETWEEN %s AND %s
+                           AND status NOT IN ('cancelled')""",
+                        (start, end)
+                    )
+                    rows = cur.fetchall()
+            booked = {
+                (r[0].replace(tzinfo=timezone.utc) if r[0].tzinfo is None else r[0])
+                for r in rows
+            }
+        except Exception as e:
+            print(f'[SCHED] get_next_available error: {e}')
+    candidate = start
+    while candidate <= end:
+        if candidate not in booked:
+            return candidate
+        candidate += timedelta(minutes=10)
+    return None
+
+
+def _send_report_email(user_email: str, operation: str, check_id: str, report: dict) -> bool:
+    """Send a check completion email via Resend. Returns True on success."""
+    if not RESEND_API_KEY:
+        print(f'[EMAIL] RESEND_API_KEY not set — skipping email for {user_email}')
+        return False
+    flags   = len(report.get('flagged', []))
+    caution = len(report.get('caution', []))
+    if flags > 0:
+        badge = (f'<span style="background:#FEE2E2;color:#DC2626;padding:3px 10px;'
+                 f'border-radius:8px;font-weight:700">{flags} flag{"s" if flags!=1 else ""} found</span>')
+        summary = f'{flags} potential non-compliance item{"s" if flags!=1 else ""} need your review.'
+    elif caution > 0:
+        badge = (f'<span style="background:#FEF3C7;color:#D97706;padding:3px 10px;'
+                 f'border-radius:8px;font-weight:700">{caution} caution item{"s" if caution!=1 else ""}</span>')
+        summary = f'{caution} item{"s" if caution!=1 else ""} flagged for review. No definitive violations found.'
+    else:
+        badge = ('<span style="background:#DCFCE7;color:#16A34A;padding:3px 10px;'
+                 'border-radius:8px;font-weight:700">No flags found</span>')
+        summary = 'All organic claims appear to match the OID certificate.'
+    report_url = f'{APP_BASE_URL}/scheduled-report/{check_id}'
+    html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:system-ui,sans-serif;background:#F8FAFC;margin:0;padding:0">
+<div style="max-width:580px;margin:40px auto;background:#fff;border:1px solid #E2E8F0;border-radius:16px;overflow:hidden">
+  <div style="background:linear-gradient(135deg,#5B3DF6 0%,#7C3AED 100%);padding:26px 30px">
+    <h1 style="color:#fff;font-size:1.15rem;margin:0;font-weight:800">Organic Web Checker</h1>
+    <p style="color:rgba(255,255,255,.75);font-size:.82rem;margin:5px 0 0">Your scheduled check is ready</p>
+  </div>
+  <div style="padding:26px 30px">
+    <p style="font-size:.78rem;color:#64748B;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Operation</p>
+    <p style="font-size:1.05rem;font-weight:700;color:#0F172A;margin-bottom:18px">{operation}</p>
+    <p style="font-size:.78rem;color:#64748B;margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">Result</p>
+    <p style="margin-bottom:6px">{badge}</p>
+    <p style="font-size:.82rem;color:#64748B;margin-bottom:26px">{summary}</p>
+    <a href="{report_url}" style="display:inline-block;background:#5B3DF6;color:#fff;text-decoration:none;padding:11px 26px;border-radius:10px;font-weight:700;font-size:.88rem">View Full Report &rarr;</a>
+    <p style="font-size:.72rem;color:#94A3B8;margin-top:26px;padding-top:18px;border-top:1px solid #E2E8F0">
+      Generated by Organic Web Checker &mdash; flags items for review, not a legal determination.<br>
+      &copy; 2026 Healer&rsquo;s Find LLC
+    </p>
+  </div>
+</div>
+</body></html>"""
+    try:
+        r = req_http.post(
+            'https://api.resend.com/emails',
+            headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+            json={'from': f'Organic Web Checker <{FROM_EMAIL}>', 'to': [user_email],
+                  'subject': f'Your Organic Web Check is Ready \u2014 {operation}',
+                  'html': html_body},
+            timeout=15
+        )
+        if r.status_code in (200, 201):
+            print(f'[EMAIL] Sent to {user_email} for {operation}')
+            return True
+        print(f'[EMAIL] Resend error {r.status_code}: {r.text[:200]}')
+        return False
+    except Exception as e:
+        print(f'[EMAIL] Exception: {e}')
+        return False
+
+
 @app.context_processor
 def inject_user():
     email = session.get('user_email')
@@ -386,6 +537,97 @@ def _run_cert_verify(request_id: str, org_name: str, db_id: int):
             print(f'[WARN] cert verify DB update failed: {e}')
 
     print(f'[CERT VERIFY] {org_name} → {result} (db_id={db_id})')
+
+
+def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: str):
+    """Wrapper: creates a job, runs it, saves result to DB, sends email."""
+    job_id = uuid.uuid4().hex[:8]
+    with jobs_lock:
+        jobs[job_id] = {
+            'id': job_id, 'operation': operation, 'website': website,
+            'status': 'queued', 'report': None,
+            'submitted_at': datetime.now(timezone.utc).isoformat(),
+            'finished_at': None, 'unlocked': True,
+        }
+    # Record job_id in DB
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('UPDATE scheduled_checks SET job_id=%s WHERE id=%s',
+                                (job_id, check_id))
+                conn.commit()
+        except Exception as e:
+            print(f'[SCHED] job_id update failed: {e}')
+    # Run the check (blocks; uses _check_semaphore)
+    _run_job(job_id, operation, website)
+    # Collect result
+    with jobs_lock:
+        job = dict(jobs.get(job_id, {}))
+    report = job.get('report', {})
+    status = 'done' if job.get('status') == 'done' and 'error' not in report else 'error'
+    # Deduct credit on success
+    if status == 'done':
+        deduct_user_credit(user_email)
+    # Persist to DB
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE scheduled_checks SET status=%s, report=%s::jsonb WHERE id=%s',
+                        (status, json.dumps(report), check_id)
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f'[SCHED] result save failed: {e}')
+    # Send email on success
+    if status == 'done':
+        _send_report_email(user_email, operation, check_id, report)
+    print(f'[SCHED] check_id={check_id} status={status} op={operation}')
+
+
+def _scheduler_loop():
+    """Poll every 60s for scheduled checks that are due, fire them as threads."""
+    time.sleep(30)  # brief startup delay
+    while True:
+        if DATABASE_URL:
+            try:
+                with db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """SELECT id, user_email, operation_name, website_url
+                               FROM scheduled_checks
+                               WHERE status = 'scheduled' AND scheduled_at <= NOW()
+                               ORDER BY scheduled_at LIMIT 5"""
+                        )
+                        rows = cur.fetchall()
+                for row in rows:
+                    check_id, user_email, operation, website = row
+                    # Atomic claim — prevents double-fire on restart
+                    with db_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "UPDATE scheduled_checks SET status='running' "
+                                "WHERE id=%s AND status='scheduled'",
+                                (check_id,)
+                            )
+                            claimed = cur.rowcount
+                        conn.commit()
+                    if claimed:
+                        threading.Thread(
+                            target=_run_scheduled_job,
+                            args=(check_id, user_email, operation, website),
+                            daemon=True
+                        ).start()
+                        print(f'[SCHED] Fired check_id={check_id} op={operation}')
+            except Exception as e:
+                print(f'[SCHED] Loop error: {e}')
+        time.sleep(60)
+
+
+_scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
+_scheduler_thread.start()
 
 
 def _run_job(job_id: str, operation: str, website: str, use_cache: bool = False):
@@ -1302,6 +1544,77 @@ GLOBAL_CSS = """
   .calc-lbl  { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
   .calc-val  { font-size: .9rem; font-weight: 800; color: var(--text); }
   .calc-sub  { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+
+  /* ── Scheduling ──────────────────────────────────────────────────────── */
+  .day-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 14px; }
+  .day-tab {
+    padding: 6px 12px; font-size: .78rem; font-weight: 600;
+    border-radius: 8px; border: 1.5px solid var(--border);
+    cursor: pointer; background: none; color: var(--muted); transition: all .12s;
+  }
+  .day-tab:hover  { border-color: var(--primary); color: var(--primary); }
+  .day-tab.active { background: var(--lavender); border-color: var(--primary); color: var(--primary); }
+  .next-avail-box {
+    background: linear-gradient(135deg,#F0FDF4,#DCFCE7);
+    border: 1.5px solid #86EFAC; border-radius: 12px;
+    padding: 14px 18px; margin-bottom: 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    cursor: pointer; transition: all .15s;
+  }
+  .next-avail-box:hover { background: linear-gradient(135deg,#DCFCE7,#BBF7D0); }
+  .next-avail-label { font-size: .75rem; font-weight: 700; color: #15803D; text-transform: uppercase; letter-spacing: .06em; }
+  .next-avail-time  { font-size: 1rem; font-weight: 800; color: #15803D; margin-top: 2px; }
+  .next-avail-arrow { font-size: 1.2rem; color: #22C55E; flex-shrink: 0; }
+  .slot-wrap { max-height: 300px; overflow-y: auto; padding-right: 4px; margin-bottom: 4px; }
+  .slot-wrap::-webkit-scrollbar { width: 4px; }
+  .slot-wrap::-webkit-scrollbar-track { background: var(--bg); }
+  .slot-wrap::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+  .hour-row { margin-bottom: 4px; }
+  .hour-label {
+    font-size: .63rem; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .07em;
+    padding: 6px 0 3px; border-top: 1px solid var(--border); margin-top: 2px;
+  }
+  .hour-slots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+  .slot-btn {
+    padding: 5px 3px; font-size: .7rem; font-weight: 600;
+    border-radius: 5px; border: 1px solid; cursor: pointer;
+    text-align: center; transition: all .12s; background: none; white-space: nowrap;
+  }
+  .slot-btn.avail    { background: #F0FDF4; border-color: #86EFAC; color: #16A34A; }
+  .slot-btn.avail:hover { background: #DCFCE7; border-color: #4ADE80; }
+  .slot-btn.booked   { background: #F8FAFC; border-color: var(--border); color: var(--dim); cursor: not-allowed; }
+  .slot-btn.past     { background: #F8FAFC; border-color: var(--border); color: var(--dim); cursor: not-allowed; opacity: .5; }
+  .slot-btn.selected { background: var(--lavender); border-color: var(--primary); color: var(--primary); font-weight: 800; }
+  .selected-slot-display {
+    background: var(--lavender); border: 1.5px solid rgba(91,61,246,.3);
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+    font-size: .9rem; font-weight: 700; color: var(--primary); display: none;
+  }
+  .sched-list-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 16px; border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--border); margin-bottom: 8px;
+  }
+  .sched-item-info  { flex: 1; min-width: 0; }
+  .sched-item-op    { font-size: .88rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sched-item-when  { font-size: .73rem; color: var(--muted); margin-top: 2px; }
+  .sched-item-badge { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; border: 1px solid; flex-shrink: 0; }
+  .badge-scheduled  { background: #F0FDF4; border-color: #86EFAC; color: #16A34A; }
+  .badge-running    { background: #FEF3C7; border-color: #FDE68A; color: #D97706; animation: pulse 1.4s ease-in-out infinite; }
+  .badge-done       { background: #F0FDFA; border-color: #99F6E4; color: var(--teal); }
+  .badge-error      { background: #FEF2F2; border-color: #FECACA; color: var(--red); }
+  .sched-cancel-btn {
+    font-size: .7rem; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid #FECACA; color: var(--red); background: none;
+    cursor: pointer; flex-shrink: 0; transition: background .12s;
+  }
+  .sched-cancel-btn:hover { background: #FEF2F2; }
+  .sched-view-btn {
+    font-size: .7rem; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid rgba(91,61,246,.2); color: var(--primary);
+    background: var(--lavender); text-decoration: none; flex-shrink: 0;
+  }
 """
 
 
@@ -1328,11 +1641,12 @@ BASE_TEMPLATE = """<!DOCTYPE html>
     <span class="header-wordmark"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></span>
   </a>
   <nav class="header-nav">
-    <a href="/"        class="nav-link {{ 'active' if active == 'home'    else '' }}">Product</a>
-    <a href="/about"   class="nav-link {{ 'active' if active == 'about'   else '' }}">How It Works</a>
-    <a href="/pricing" class="nav-link {{ 'active' if active == 'pricing' else '' }}">Pricing</a>
-    <a href="/history" class="nav-link {{ 'active' if active == 'history' else '' }}">History</a>
-    <a href="/agents"  class="nav-link {{ 'active' if active == 'agents'  else '' }}">API</a>
+    <a href="/"         class="nav-link {{ 'active' if active == 'home'     else '' }}">Product</a>
+    <a href="/schedule" class="nav-link {{ 'active' if active == 'schedule' else '' }}">Schedule</a>
+    <a href="/about"    class="nav-link {{ 'active' if active == 'about'    else '' }}">How It Works</a>
+    <a href="/pricing"  class="nav-link {{ 'active' if active == 'pricing'  else '' }}">Pricing</a>
+    <a href="/history"  class="nav-link {{ 'active' if active == 'history'  else '' }}">History</a>
+    <a href="/agents"   class="nav-link {{ 'active' if active == 'agents'   else '' }}">API</a>
   </nav>
   <div class="header-right">
     <div id="navUserArea">
@@ -1349,6 +1663,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
+        <a class="dropdown-item" href="/schedule">Schedule a Check</a>
         <a class="dropdown-item" href="/history">Check History</a>
         <a class="dropdown-item" href="/pricing">Pricing</a>
         <a class="dropdown-item" href="/agents">Agents &amp; API</a>
@@ -2067,6 +2382,7 @@ MAIN_HTML = """<!DOCTYPE html>
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
+        <a class="dropdown-item" href="/schedule">Schedule a Check</a>
         <a class="dropdown-item" href="/history">Check History</a>
         <a class="dropdown-item" href="/pricing">Pricing</a>
         <a class="dropdown-item" href="/agents">Agents &amp; API</a>
@@ -4611,6 +4927,482 @@ def mcp_server():
             "error": {"code": -32601, "message": f"Method not found: {method}"},
             "id": req_id
         }), 400
+
+
+# ---------------------------------------------------------------------------
+# Scheduled Checker page + API routes
+# ---------------------------------------------------------------------------
+
+def schedule_page_html(user_email: str) -> str:
+    credits = get_user_credits(user_email) if user_email else 0
+    admin   = is_admin(user_email)
+
+    if not user_email:
+        return """
+        <div class="page-title">Schedule a Check</div>
+        <div class="page-subtitle">Book a specific time slot and receive your report by email when it&rsquo;s ready.</div>
+        <div class="card" style="text-align:center;padding:40px">
+          <div style="font-size:2.5rem;margin-bottom:16px">&#128197;</div>
+          <div style="font-size:1.05rem;font-weight:800;color:var(--primary);margin-bottom:8px">Sign in to schedule a check</div>
+          <div style="font-size:.85rem;color:var(--muted);margin-bottom:22px">A free account is required to book time slots and receive email reports.</div>
+          <button class="btn-primary" onclick="openAuthModal('signin')">Sign In &nbsp;/&nbsp; Create Account</button>
+        </div>"""
+
+    if not admin and credits < 1:
+        return """
+        <div class="page-title">Schedule a Check</div>
+        <div class="page-subtitle">Book a specific time slot and receive your report by email when it&rsquo;s ready.</div>
+        <div class="card" style="text-align:center;padding:40px">
+          <div style="font-size:2.5rem;margin-bottom:16px">&#128199;</div>
+          <div style="font-size:1.05rem;font-weight:800;color:var(--primary);margin-bottom:8px">No credits remaining</div>
+          <div style="font-size:.85rem;color:var(--muted);margin-bottom:22px">Purchase credits to schedule checks. Credits are deducted when your scheduled check runs.</div>
+          <a href="/pricing" class="btn-primary" style="text-decoration:none;display:inline-block">View Pricing</a>
+        </div>"""
+
+    return """
+    <div class="page-title">Schedule a Check</div>
+    <div class="page-subtitle">Pick a time slot &mdash; your check runs automatically and the report arrives by email. Slots every 10 minutes, first-come first-serve.</div>
+
+    <div class="card">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Check Details</div>
+      <label>Operation Name</label>
+      <input type="text" id="schedOp" placeholder="e.g. Green Hills Farm" style="margin-bottom:14px">
+      <label>Website URL</label>
+      <input type="text" id="schedUrl" placeholder="https://example.com">
+    </div>
+
+    <div class="card">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Choose a Time Slot</div>
+
+      <div class="next-avail-box" id="nextAvailBox" onclick="selectNextAvailable()">
+        <div>
+          <div class="next-avail-label">Next Available</div>
+          <div class="next-avail-time" id="nextAvailTime">Loading&hellip;</div>
+        </div>
+        <div class="next-avail-arrow">&#8594;</div>
+      </div>
+
+      <div style="font-size:.76rem;color:var(--muted);text-align:center;margin-bottom:12px">or choose a specific day</div>
+
+      <div class="day-tabs" id="dayTabs"></div>
+
+      <div id="slotLoading" style="text-align:center;padding:20px;color:var(--muted);font-size:.84rem">Loading slots&hellip;</div>
+      <div class="slot-wrap" id="slotGrid" style="display:none"></div>
+
+      <div class="selected-slot-display" id="selectedDisplay">
+        &#128197; Booked for: <span id="selectedSlotText"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" disabled style="width:100%;opacity:.5">Confirm Booking</button>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit deducted when your check runs &mdash; not at booking</div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Your Scheduled Checks</div>
+      <div id="myChecksList"><div style="text-align:center;color:var(--muted);font-size:.84rem;padding:20px">Loading&hellip;</div></div>
+    </div>
+
+    <script>
+    var _selectedSlot = null;
+    var _nextAvailIso = null;
+
+    // ── Day tabs ──────────────────────────────────────────────────────────
+    function buildDayTabs() {
+      var tabs = document.getElementById('dayTabs');
+      tabs.innerHTML = '';
+      var now = new Date();
+      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      for (var i = 0; i < 7; i++) {
+        var d = new Date(now);
+        d.setDate(d.getDate() + i);
+        var label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
+                    days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate();
+        var ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        var btn = document.createElement('button');
+        btn.className = 'day-tab' + (i === 0 ? ' active' : '');
+        btn.textContent = label;
+        btn.dataset.date = ds;
+        btn.onclick = (function(date, el) {
+          return function() {
+            document.querySelectorAll('.day-tab').forEach(function(t){t.classList.remove('active');});
+            el.classList.add('active');
+            loadSlots(date);
+          };
+        })(ds, btn);
+        tabs.appendChild(btn);
+      }
+    }
+
+    // ── Slot grid ─────────────────────────────────────────────────────────
+    function loadSlots(dateStr) {
+      document.getElementById('slotLoading').style.display = '';
+      document.getElementById('slotGrid').style.display = 'none';
+      fetch('/api/available-slots?date=' + dateStr)
+        .then(function(r){return r.json();})
+        .then(function(data) {
+          var booked = new Set(data.booked || []);
+          if (data.next_available && !_selectedSlot) {
+            _nextAvailIso = data.next_available;
+            document.getElementById('nextAvailTime').textContent = fmtSlot(data.next_available);
+          }
+          renderSlotGrid(dateStr, booked);
+        })
+        .catch(function(){
+          document.getElementById('slotLoading').style.display = 'none';
+          document.getElementById('slotGrid').style.display = '';
+          document.getElementById('slotGrid').innerHTML = '<div style="color:var(--muted);padding:12px">Unable to load slots.</div>';
+        });
+    }
+
+    function renderSlotGrid(dateStr, bookedSet) {
+      var grid = document.getElementById('slotGrid');
+      var now  = new Date();
+      var cutoff = new Date(now.getTime() + 5 * 60000); // 5 min from now
+      grid.innerHTML = '';
+      for (var hour = 0; hour < 24; hour++) {
+        var row = document.createElement('div');
+        row.className = 'hour-row';
+        var lbl = document.createElement('div');
+        lbl.className = 'hour-label';
+        lbl.textContent = (hour === 0 ? '12' : hour <= 12 ? hour : hour - 12) +
+                          ':00 ' + (hour < 12 ? 'AM' : 'PM');
+        row.appendChild(lbl);
+        var slotsDiv = document.createElement('div');
+        slotsDiv.className = 'hour-slots';
+        for (var m = 0; m < 60; m += 10) {
+          var isoStr = dateStr + 'T' + String(hour).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':00Z';
+          var slotDt  = new Date(isoStr);
+          var isPast   = slotDt < cutoff;
+          var isBooked = bookedSet.has(isoStr);
+          var isSel    = _selectedSlot === isoStr;
+          var btn = document.createElement('button');
+          btn.className = 'slot-btn ' + (isSel ? 'selected' : isPast ? 'past' : isBooked ? 'booked' : 'avail');
+          btn.textContent = String(hour === 0 || hour === 12 ? 12 : hour % 12).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+          btn.disabled = isPast || isBooked;
+          if (!isPast && !isBooked) {
+            btn.onclick = (function(iso){return function(){selectSlot(iso);};})(isoStr);
+          }
+          slotsDiv.appendChild(btn);
+        }
+        row.appendChild(slotsDiv);
+        grid.appendChild(row);
+      }
+      document.getElementById('slotLoading').style.display = 'none';
+      grid.style.display = '';
+      // Scroll to first available slot
+      var firstAvail = grid.querySelector('.avail');
+      if (firstAvail) firstAvail.scrollIntoView({block:'nearest'});
+    }
+
+    function fmtSlot(isoStr) {
+      var d = new Date(isoStr);
+      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate() +
+             ' \u00b7 ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    }
+
+    function selectSlot(isoStr) {
+      _selectedSlot = isoStr;
+      document.querySelectorAll('.slot-btn').forEach(function(b){
+        b.classList.remove('selected');
+        if (!b.disabled) b.className = b.className.replace('selected','avail');
+      });
+      // Find and highlight the selected button
+      loadActiveDay();
+      var disp = document.getElementById('selectedDisplay');
+      disp.style.display = '';
+      document.getElementById('selectedSlotText').textContent = fmtSlot(isoStr);
+      var btn = document.getElementById('confirmBtn');
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+
+    function loadActiveDay() {
+      var active = document.querySelector('.day-tab.active');
+      if (active) loadSlots(active.dataset.date);
+    }
+
+    function selectNextAvailable() {
+      if (!_nextAvailIso) return;
+      // Switch to the correct day tab
+      var d = new Date(_nextAvailIso);
+      var ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      document.querySelectorAll('.day-tab').forEach(function(t){
+        if (t.dataset.date === ds) {
+          document.querySelectorAll('.day-tab').forEach(function(x){x.classList.remove('active');});
+          t.classList.add('active');
+        }
+      });
+      loadSlots(ds);
+      _selectedSlot = _nextAvailIso;
+      var disp = document.getElementById('selectedDisplay');
+      disp.style.display = '';
+      document.getElementById('selectedSlotText').textContent = fmtSlot(_nextAvailIso);
+      var btn = document.getElementById('confirmBtn');
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+
+    // ── Booking ───────────────────────────────────────────────────────────
+    async function confirmBooking() {
+      var op  = document.getElementById('schedOp').value.trim();
+      var url = document.getElementById('schedUrl').value.trim();
+      if (!op || !url) { alert('Please enter operation name and website URL.'); return; }
+      if (!_selectedSlot) { alert('Please select a time slot.'); return; }
+      if (!url.startsWith('http')) url = 'https://' + url;
+      var btn = document.getElementById('confirmBtn');
+      btn.disabled = true; btn.textContent = 'Booking\u2026';
+      try {
+        var res = await fetch('/api/schedule-check', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({operation: op, website: url, scheduled_at: _selectedSlot})
+        });
+        var data = await res.json();
+        if (data.ok) {
+          _selectedSlot = null;
+          document.getElementById('selectedDisplay').style.display = 'none';
+          document.getElementById('schedOp').value = '';
+          document.getElementById('schedUrl').value = '';
+          btn.textContent = 'Booked!';
+          btn.style.background = 'var(--green)';
+          setTimeout(function(){
+            btn.textContent = 'Confirm Booking';
+            btn.style.background = '';
+            btn.disabled = true; btn.style.opacity = '.5';
+          }, 2500);
+          loadActiveDay();
+          loadMyChecks();
+        } else {
+          alert(data.error || 'Booking failed. Please try again.');
+          btn.disabled = false; btn.textContent = 'Confirm Booking';
+        }
+      } catch(e) {
+        alert('Network error. Please try again.');
+        btn.disabled = false; btn.textContent = 'Confirm Booking';
+      }
+    }
+
+    // ── My scheduled checks ───────────────────────────────────────────────
+    async function loadMyChecks() {
+      try {
+        var res = await fetch('/api/my-scheduled-checks');
+        var data = await res.json();
+        var el = document.getElementById('myChecksList');
+        if (!data.checks || data.checks.length === 0) {
+          el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:.84rem;padding:16px">No scheduled checks yet.</div>';
+          return;
+        }
+        var html = '';
+        data.checks.forEach(function(c) {
+          var badgeClass = 'badge-' + c.status;
+          var actions = '';
+          if (c.status === 'scheduled') {
+            actions = '<button class="sched-cancel-btn" onclick="cancelCheck(\''+c.id+'\')">Cancel</button>';
+          } else if (c.status === 'done') {
+            actions = '<a class="sched-view-btn" href="/scheduled-report/'+c.id+'">View</a>';
+          }
+          html += '<div class="sched-list-item">' +
+            '<div class="sched-item-info">' +
+              '<div class="sched-item-op">'+escHtml(c.operation_name)+'</div>' +
+              '<div class="sched-item-when">'+fmtSlot(c.scheduled_at)+'</div>' +
+            '</div>' +
+            '<span class="sched-item-badge '+badgeClass+'">'+c.status+'</span>' +
+            actions +
+          '</div>';
+        });
+        el.innerHTML = html;
+      } catch(e) {
+        document.getElementById('myChecksList').innerHTML =
+          '<div style="color:var(--muted);font-size:.84rem;padding:12px">Unable to load.</div>';
+      }
+    }
+
+    async function cancelCheck(id) {
+      if (!confirm('Cancel this scheduled check?')) return;
+      var res = await fetch('/api/cancel-scheduled/'+id, {method:'POST'});
+      var data = await res.json();
+      if (data.ok) { loadMyChecks(); loadActiveDay(); }
+      else alert(data.error || 'Cancel failed.');
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────
+    buildDayTabs();
+    var todayStr = (function(){
+      var d = new Date();
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    })();
+    loadSlots(todayStr);
+    loadMyChecks();
+    </script>"""
+
+
+@app.route('/schedule')
+def schedule():
+    email = get_logged_in_email()
+    body  = schedule_page_html(email)
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='Schedule a Check', active='schedule', body=body)
+
+
+@app.route('/api/available-slots')
+def api_available_slots():
+    date_str = request.args.get('date', '')
+    if not date_str:
+        return jsonify({'error': 'date required'}), 400
+    booked     = get_booked_slots_for_day(date_str)
+    next_slot  = get_next_available_slot()
+    next_iso   = next_slot.strftime('%Y-%m-%dT%H:%M:00Z') if next_slot else None
+    return jsonify({'booked': booked, 'next_available': next_iso})
+
+
+@app.route('/api/schedule-check', methods=['POST'])
+def api_schedule_check():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Sign in required'}), 401
+    if not is_admin(email) and get_user_credits(email) < 1:
+        return jsonify({'error': 'No credits remaining. Purchase credits to schedule checks.'}), 402
+    data         = request.get_json(force=True) or {}
+    operation    = data.get('operation', '').strip()
+    website      = data.get('website', '').strip()
+    scheduled_at = data.get('scheduled_at', '').strip()
+    if not operation or not website or not scheduled_at:
+        return jsonify({'error': 'operation, website, and scheduled_at are required'}), 400
+    if not website.startswith('http'):
+        website = 'https://' + website
+    # Parse and validate the slot
+    try:
+        slot_dt = datetime.fromisoformat(scheduled_at.replace('Z', '+00:00'))
+    except ValueError:
+        return jsonify({'error': 'Invalid scheduled_at format. Use ISO 8601 UTC.'}), 400
+    if slot_dt < datetime.now(timezone.utc) + timedelta(minutes=3):
+        return jsonify({'error': 'Slot must be at least 3 minutes in the future.'}), 400
+    check_id = uuid.uuid4().hex[:12]
+    if not DATABASE_URL:
+        return jsonify({'error': 'Database not configured'}), 500
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO scheduled_checks (id, user_email, operation_name, website_url, scheduled_at)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (check_id, email, operation, website, slot_dt)
+                )
+            conn.commit()
+    except psycopg2.IntegrityError:
+        return jsonify({'error': 'That time slot is already booked. Please choose another.'}), 409
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'ok': True, 'check_id': check_id,
+                    'scheduled_at': slot_dt.strftime('%Y-%m-%dT%H:%M:00Z')})
+
+
+@app.route('/api/my-scheduled-checks')
+def api_my_scheduled_checks():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Not logged in'}), 401
+    if not DATABASE_URL:
+        return jsonify({'checks': []})
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, operation_name, website_url, scheduled_at, status, job_id
+                       FROM scheduled_checks
+                       WHERE user_email = %s AND status NOT IN ('cancelled')
+                       ORDER BY scheduled_at DESC LIMIT 50""",
+                    (email,)
+                )
+                rows = cur.fetchall()
+        checks = [
+            {'id': r[0], 'operation_name': r[1], 'website_url': r[2],
+             'scheduled_at': r[3].strftime('%Y-%m-%dT%H:%M:00Z'),
+             'status': r[4], 'job_id': r[5]}
+            for r in rows
+        ]
+        return jsonify({'checks': checks})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cancel-scheduled/<check_id>', methods=['POST'])
+def api_cancel_scheduled(check_id):
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Not logged in'}), 401
+    if not DATABASE_URL:
+        return jsonify({'error': 'Database not configured'}), 500
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE scheduled_checks SET status='cancelled'
+                       WHERE id=%s AND user_email=%s AND status='scheduled'""",
+                    (check_id, email)
+                )
+                updated = cur.rowcount
+            conn.commit()
+        if not updated:
+            return jsonify({'error': 'Check not found or already running/done'}), 404
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/scheduled-report/<check_id>')
+def scheduled_report(check_id):
+    if not DATABASE_URL:
+        return 'Database not configured', 500
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT operation_name, website_url, status, report, user_email, scheduled_at, job_id '
+                    'FROM scheduled_checks WHERE id=%s',
+                    (check_id,)
+                )
+                row = cur.fetchone()
+    except Exception as e:
+        return f'Database error: {e}', 500
+    if not row:
+        return 'Report not found', 404
+    op, website, status, report, owner_email, sched_at, job_id = row
+    if status not in ('done', 'error'):
+        body = f"""
+        <div class="page-title">{op}</div>
+        <div class="page-subtitle">{website}</div>
+        <div class="card" style="text-align:center;padding:40px">
+          <div style="font-size:2rem;margin-bottom:14px">&#128197;</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--primary);margin-bottom:8px">Check Scheduled</div>
+          <div style="font-size:.85rem;color:var(--muted)">
+            Scheduled for {sched_at.strftime('%Y-%m-%d %H:%M UTC') if sched_at else 'your selected slot'}.<br>
+            You&rsquo;ll receive an email when the report is ready.
+          </div>
+        </div>"""
+        return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                      page_title=op, active='schedule', body=body)
+    if not report:
+        return 'Report data not found', 404
+    # Render using existing REPORT_PARTIAL; job_id may be None so use check_id for downloads
+    display_job_id = job_id or check_id
+    body = render_template_string(REPORT_PARTIAL, report=report, job_id=display_job_id)
+    header = f"""
+    <div class="page-title">{op}</div>
+    <div class="page-subtitle" style="margin-bottom:10px">{website} &middot;
+      Scheduled check &middot; {sched_at.strftime('%Y-%m-%d %H:%M UTC') if sched_at else ''}
+    </div>"""
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title=op, active='schedule', body=header + body)
 
 
 @app.route('/static/<path:filename>')
