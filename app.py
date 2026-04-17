@@ -2361,11 +2361,12 @@ MAIN_HTML = """<!DOCTYPE html>
     <span class="header-wordmark"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></span>
   </a>
   <nav class="header-nav">
-    <a href="/"        class="nav-link active">Product</a>
-    <a href="/about"   class="nav-link">How It Works</a>
-    <a href="/pricing" class="nav-link">Pricing</a>
-    <a href="/history" class="nav-link">History</a>
-    <a href="/agents"  class="nav-link">API</a>
+    <a href="/"         class="nav-link active">Product</a>
+    <a href="/schedule" class="nav-link">Schedule</a>
+    <a href="/about"    class="nav-link">How It Works</a>
+    <a href="/pricing"  class="nav-link">Pricing</a>
+    <a href="/history"  class="nav-link">History</a>
+    <a href="/agents"   class="nav-link">API</a>
   </nav>
   <div class="header-right">
     <div id="navUserArea">
