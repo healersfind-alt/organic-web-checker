@@ -4997,7 +4997,7 @@ def schedule_page_html(user_email: str) -> str:
 
     <div class="card">
       <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" disabled style="width:100%;opacity:.5">Confirm Booking</button>
-      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit deducted when your check runs &mdash; not at booking</div>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 Checker burned when your report runs &mdash; not at booking</div>
     </div>
 
     <div class="card">
