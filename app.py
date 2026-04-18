@@ -38,18 +38,21 @@ _db_pub_url = os.environ.get('DATABASE_PUBLIC_URL', '')
 DATABASE_URL = _db_pub_url or _db_url
 APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebchecker.com')
 
-# SMTP — set these Railway env vars to enable password-reset emails:
-#   SMTP_HOST (default: smtp.gmail.com)
-#   SMTP_PORT (default: 587)
-#   SMTP_USER (your sending address)
-#   SMTP_PASS (app password or SMTP password)
-#   FROM_EMAIL (defaults to SMTP_USER)
-SMTP_HOST  = os.environ.get('SMTP_HOST',  'smtp.gmail.com')
-SMTP_PORT  = int(os.environ.get('SMTP_PORT', '587'))
-SMTP_USER  = os.environ.get('SMTP_USER',  '')
-SMTP_PASS  = os.environ.get('SMTP_PASS',  '')
-FROM_EMAIL     = os.environ.get('FROM_EMAIL', SMTP_USER or 'hello@organicwebchecker.com')
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+# SMTP — Google Workspace accounts, all via smtp.gmail.com:587
+#   REPORT_SMTP_PASS  — app password for report@organicwebchecker.com (reports)
+#   HELLO_SMTP_PASS   — app password for hello@organicwebchecker.com  (welcome / marketing)
+#   SMTP_PASS         — legacy fallback for password-reset (hello@ or any address)
+#   SMTP_USER         — legacy fallback sender address
+SMTP_HOST        = 'smtp.gmail.com'
+SMTP_PORT        = 587
+REPORT_SMTP_USER = 'report@organicwebchecker.com'
+REPORT_SMTP_PASS = os.environ.get('REPORT_SMTP_PASS', '')
+HELLO_SMTP_USER  = 'hello@organicwebchecker.com'
+HELLO_SMTP_PASS  = os.environ.get('HELLO_SMTP_PASS', '')
+SMTP_USER        = os.environ.get('SMTP_USER',  HELLO_SMTP_USER)
+SMTP_PASS        = os.environ.get('SMTP_PASS',  HELLO_SMTP_PASS)
+FROM_EMAIL       = os.environ.get('FROM_EMAIL', SMTP_USER)
+RESEND_API_KEY   = os.environ.get('RESEND_API_KEY', '')
 
 # ---------------------------------------------------------------------------
 # Postgres helpers
@@ -425,33 +428,56 @@ def get_next_available_slot() -> datetime | None:
     return None
 
 
-def _send_report_email(user_email: str, operation: str, check_id: str, report: dict) -> bool:
-    """Send a check completion email via Resend. Returns True on success."""
-    if not RESEND_API_KEY:
-        print(f'[EMAIL] RESEND_API_KEY not set — skipping email for {user_email}')
+def _smtp_send(smtp_user: str, smtp_pass: str, to_email: str, subject: str, html_body: str) -> bool:
+    """Send an email via Gmail SMTP. Returns True on success."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    if not smtp_pass:
+        print(f'[EMAIL] No app password set for {smtp_user} — skipping send to {to_email}')
         return False
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = f'Organic Web Checker <{smtp_user}>'
+    msg['To']      = to_email
+    msg.attach(MIMEText(html_body, 'html'))
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+            s.ehlo()
+            s.starttls()
+            s.login(smtp_user, smtp_pass)
+            s.sendmail(smtp_user, to_email, msg.as_string())
+        print(f'[EMAIL] Sent from {smtp_user} to {to_email}: {subject}')
+        return True
+    except Exception as exc:
+        print(f'[EMAIL] SMTP error ({smtp_user} → {to_email}): {exc}')
+        return False
+
+
+def _build_report_html(operation: str, report: dict, report_url: str) -> tuple[str, str]:
+    """Return (subject, html_body) for a completed check report email."""
     flags   = len(report.get('flagged', []))
     caution = len(report.get('caution', []))
     if flags > 0:
-        badge = (f'<span style="background:#FEE2E2;color:#DC2626;padding:3px 10px;'
-                 f'border-radius:8px;font-weight:700">{flags} flag{"s" if flags!=1 else ""} found</span>')
-        summary = f'{flags} potential non-compliance item{"s" if flags!=1 else ""} need your review.'
+        badge   = (f'<span style="background:#FEE2E2;color:#DC2626;padding:3px 10px;'
+                   f'border-radius:8px;font-weight:700">{flags} flag{"s" if flags!=1 else ""} found</span>')
+        summary = f'{flags} potential non-compliance item{"s" if flags!=1 else ""} may need your review.'
     elif caution > 0:
-        badge = (f'<span style="background:#FEF3C7;color:#D97706;padding:3px 10px;'
-                 f'border-radius:8px;font-weight:700">{caution} caution item{"s" if caution!=1 else ""}</span>')
-        summary = f'{caution} item{"s" if caution!=1 else ""} flagged for review. No definitive violations found.'
+        badge   = (f'<span style="background:#FEF3C7;color:#D97706;padding:3px 10px;'
+                   f'border-radius:8px;font-weight:700">{caution} caution item{"s" if caution!=1 else ""}</span>')
+        summary = f'{caution} item{"s" if caution!=1 else ""} surfaced for review. No definitive violations found.'
     else:
-        badge = ('<span style="background:#DCFCE7;color:#16A34A;padding:3px 10px;'
-                 'border-radius:8px;font-weight:700">No flags found</span>')
+        badge   = ('<span style="background:#DCFCE7;color:#16A34A;padding:3px 10px;'
+                   'border-radius:8px;font-weight:700">No flags found</span>')
         summary = 'All organic claims appear to match the OID certificate.'
-    report_url = f'{APP_BASE_URL}/scheduled-report/{check_id}'
+    subject   = f'Your Organic Web Check \u2014 {operation}'
     html_body = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
 <body style="font-family:system-ui,sans-serif;background:#F8FAFC;margin:0;padding:0">
 <div style="max-width:580px;margin:40px auto;background:#fff;border:1px solid #E2E8F0;border-radius:16px;overflow:hidden">
   <div style="background:linear-gradient(135deg,#5B3DF6 0%,#7C3AED 100%);padding:26px 30px">
     <h1 style="color:#fff;font-size:1.15rem;margin:0;font-weight:800">Organic Web Checker</h1>
-    <p style="color:rgba(255,255,255,.75);font-size:.82rem;margin:5px 0 0">Your scheduled check is ready</p>
+    <p style="color:rgba(255,255,255,.75);font-size:.82rem;margin:5px 0 0">Your compliance check is ready</p>
   </div>
   <div style="padding:26px 30px">
     <p style="font-size:.78rem;color:#64748B;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Operation</p>
@@ -461,36 +487,24 @@ def _send_report_email(user_email: str, operation: str, check_id: str, report: d
     <p style="font-size:.82rem;color:#64748B;margin-bottom:26px">{summary}</p>
     <a href="{report_url}" style="display:inline-block;background:#5B3DF6;color:#fff;text-decoration:none;padding:11px 26px;border-radius:10px;font-weight:700;font-size:.88rem">View Full Report &rarr;</a>
     <p style="font-size:.72rem;color:#94A3B8;margin-top:26px;padding-top:18px;border-top:1px solid #E2E8F0">
-      Generated by Organic Web Checker &mdash; flags items for review, not a legal determination.<br>
+      Generated by Organic Web Checker &mdash; identifies potential items for review, not a legal determination.<br>
       &copy; 2026 Healer&rsquo;s Find LLC
     </p>
   </div>
 </div>
 </body></html>"""
-    try:
-        r = req_http.post(
-            'https://api.resend.com/emails',
-            headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
-            json={'from': f'Organic Web Checker <{FROM_EMAIL}>', 'to': [user_email],
-                  'subject': f'Your Organic Web Check is Ready \u2014 {operation}',
-                  'html': html_body},
-            timeout=15
-        )
-        if r.status_code in (200, 201):
-            print(f'[EMAIL] Sent to {user_email} for {operation}')
-            return True
-        print(f'[EMAIL] Resend error {r.status_code}: {r.text[:200]}')
-        return False
-    except Exception as e:
-        print(f'[EMAIL] Exception: {e}')
-        return False
+    return subject, html_body
+
+
+def _send_report_email(user_email: str, operation: str, check_id: str, report: dict) -> bool:
+    """Send a completed-check report email from report@organicwebchecker.com."""
+    report_url = f'{APP_BASE_URL}/scheduled-report/{check_id}'
+    subject, html_body = _build_report_html(operation, report, report_url)
+    return _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, user_email, subject, html_body)
 
 
 def _send_welcome_email(to_email: str) -> bool:
-    """Send welcome email from hello@ via Resend when a new account is created."""
-    if not RESEND_API_KEY:
-        print(f'[EMAIL] RESEND_API_KEY not set — skipping welcome email for {to_email}')
-        return False
+    """Send a welcome email from hello@organicwebchecker.com on new account creation."""
     html_body = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
 <body style="font-family:system-ui,sans-serif;background:#F8FAFC;margin:0;padding:0">
@@ -515,26 +529,7 @@ def _send_welcome_email(to_email: str) -> bool:
   </div>
 </div>
 </body></html>"""
-    try:
-        r = req_http.post(
-            'https://api.resend.com/emails',
-            headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
-            json={
-                'from': 'Organic Web Checker <hello@organicwebchecker.com>',
-                'to': [to_email],
-                'subject': 'Welcome to Organic Web Checker',
-                'html': html_body,
-            },
-            timeout=15
-        )
-        if r.status_code in (200, 201):
-            print(f'[EMAIL] Welcome sent to {to_email}')
-            return True
-        print(f'[EMAIL] Welcome email Resend error {r.status_code}: {r.text[:200]}')
-        return False
-    except Exception as exc:
-        print(f'[EMAIL] Welcome email exception: {exc}')
-        return False
+    return _smtp_send(HELLO_SMTP_USER, HELLO_SMTP_PASS, to_email, 'Welcome to Organic Web Checker', html_body)
 
 
 @app.context_processor
@@ -2698,6 +2693,7 @@ MAIN_HTML = """<!DOCTYPE html>
         <input type="text" id="operation" name="operation"
                placeholder="e.g. SUNNYCREST NATURALS LLC"
                value="{{ prefill_op or '' }}" required>
+        <div class="hint" style="margin-top:-10px;margin-bottom:10px">&#9432; Use the exact legal name from the USDA OID certificate — trade names or abbreviations may return no results.</div>
         <label for="website">Website URL</label>
         <input type="text" id="website" name="website"
                placeholder="e.g. https://greenridgeorganics.com"
@@ -2894,11 +2890,24 @@ MAIN_HTML = """<!DOCTYPE html>
       }
       const viewBtn = (j.status === 'done' || j.status === 'error')
         ? '<button class="view-btn" onclick="showJob(\\'' + j.id + '\\')">View</button>' : '';
-      return '<li class="queue-item"><div><div class="op-name">' + j.operation + '</div><div class="site">' + j.website + '</div></div>' + pill + viewBtn + '</li>';
+      const emailBtn = (j.status === 'done')
+        ? '<button class="view-btn" style="color:var(--cyan);border-color:rgba(0,229,204,.2);margin-left:4px" onclick="emailReport(\\'' + j.id + '\\',this)">&#9993; Email</button>' : '';
+      return '<li class="queue-item"><div><div class="op-name">' + j.operation + '</div><div class="site">' + j.website + '</div></div>' + pill + viewBtn + emailBtn + '</li>';
     }).join('');
   }
 
   async function showJob(jobId) { viewingJobId = jobId; await loadResult(jobId); }
+
+  async function emailReport(jobId, btn) {
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/job/' + jobId + '/email-report', {method:'POST'});
+      const d = await r.json();
+      btn.textContent = d.ok ? '✓ Sent' : '✗ Failed';
+      if (!d.ok) setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+    } catch(e) { btn.textContent = '✗ Error'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000); }
+  }
 
   if (ACTIVE_JOB) startPolling(ACTIVE_JOB);
   refreshQueue();
@@ -4377,6 +4386,26 @@ def download_pdf(job_id):
 </body>
 </html>"""
     return Response(html, mimetype='text/html')
+
+
+@app.route('/job/<job_id>/email-report', methods=['POST'])
+def email_report(job_id):
+    """Email a completed instant-check report to the logged-in user."""
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'ok': False, 'error': 'Sign in to email reports'}), 401
+    with jobs_lock:
+        job = dict(jobs.get(job_id, {}))
+    if not job or job.get('status') != 'done' or 'error' in job.get('report', {}):
+        return jsonify({'ok': False, 'error': 'Report not ready'}), 400
+    report     = job['report']
+    operation  = report.get('operation', 'Unknown Operation')
+    report_url = f'{APP_BASE_URL}/job/{job_id}'
+    subject, html_body = _build_report_html(operation, report, report_url)
+    ok = _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, email, subject, html_body)
+    if ok:
+        return jsonify({'ok': True})
+    return jsonify({'ok': False, 'error': 'Email failed — check Railway logs'}), 500
 
 
 @app.route('/pricing')
