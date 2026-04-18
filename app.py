@@ -486,6 +486,57 @@ def _send_report_email(user_email: str, operation: str, check_id: str, report: d
         return False
 
 
+def _send_welcome_email(to_email: str) -> bool:
+    """Send welcome email from hello@ via Resend when a new account is created."""
+    if not RESEND_API_KEY:
+        print(f'[EMAIL] RESEND_API_KEY not set — skipping welcome email for {to_email}')
+        return False
+    html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:system-ui,sans-serif;background:#F8FAFC;margin:0;padding:0">
+<div style="max-width:560px;margin:40px auto;background:#fff;border:1px solid #E2E8F0;border-radius:16px;overflow:hidden">
+  <div style="background:linear-gradient(135deg,#5B3DF6 0%,#7C3AED 100%);padding:26px 30px">
+    <h1 style="color:#fff;font-size:1.15rem;margin:0;font-weight:800">Organic Web Checker</h1>
+    <p style="color:rgba(255,255,255,.75);font-size:.82rem;margin:5px 0 0">Welcome — your account is ready</p>
+  </div>
+  <div style="padding:26px 30px">
+    <p style="font-size:1rem;color:#0F172A;margin-bottom:14px">Thanks for signing up.</p>
+    <p style="font-size:.88rem;color:#475569;line-height:1.6;margin-bottom:22px">
+      Your account includes free trial credits to run your first checks. Each check compares a certified
+      operation&rsquo;s website claims against their live USDA OID certificate and returns a categorized compliance report.
+    </p>
+    <a href="{APP_BASE_URL}" style="display:inline-block;background:#5B3DF6;color:#fff;text-decoration:none;padding:11px 26px;border-radius:10px;font-weight:700;font-size:.88rem">Run Your First Check &rarr;</a>
+    <p style="font-size:.78rem;color:#64748B;margin-top:22px;line-height:1.5">
+      Questions? Reply to <a href="mailto:support@organicwebchecker.com" style="color:#5B3DF6">support@organicwebchecker.com</a> — we&rsquo;re here to help.
+    </p>
+    <p style="font-size:.72rem;color:#94A3B8;margin-top:18px;padding-top:14px;border-top:1px solid #E2E8F0">
+      &copy; 2026 Healer&rsquo;s Find LLC &mdash; Organic Web Checker
+    </p>
+  </div>
+</div>
+</body></html>"""
+    try:
+        r = req_http.post(
+            'https://api.resend.com/emails',
+            headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+            json={
+                'from': 'Organic Web Checker <hello@organicwebchecker.com>',
+                'to': [to_email],
+                'subject': 'Welcome to Organic Web Checker',
+                'html': html_body,
+            },
+            timeout=15
+        )
+        if r.status_code in (200, 201):
+            print(f'[EMAIL] Welcome sent to {to_email}')
+            return True
+        print(f'[EMAIL] Welcome email Resend error {r.status_code}: {r.text[:200]}')
+        return False
+    except Exception as exc:
+        print(f'[EMAIL] Welcome email exception: {exc}')
+        return False
+
+
 @app.context_processor
 def inject_user():
     email = session.get('user_email')
@@ -4154,6 +4205,7 @@ def register():
             conn.commit()
         session['user_email'] = email
         credits = get_user_credits(email)
+        _send_welcome_email(email)
         return jsonify({'ok': True, 'email': email, 'credits': credits})
     except Exception as e:
         err = str(e)

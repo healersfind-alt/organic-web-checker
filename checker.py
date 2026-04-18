@@ -6,6 +6,7 @@ against their live USDA OID certificate.
 
 import re
 import time
+import json
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -241,16 +242,28 @@ def cert_has_only_general_terms(cert_products: list) -> bool:
     return all(bool(_GENERAL_CERT_RE.match(p.strip())) for p in cert_products)
 
 
+class ScrapeError(Exception):
+    """Raised when all website scraping methods fail; recorded in CSV as error."""
+
+
 def scrape_shopify(base_url: str) -> list[dict]:
     """Pull product titles and URLs from Shopify JSON API."""
     url = base_url.rstrip('/') + '/products.json?limit=250'
     products = []
     page = 1
     while True:
-        r = requests.get(f"{url}&page={page}", headers=HEADERS, timeout=15)
+        try:
+            r = requests.get(f"{url}&page={page}", headers=HEADERS, timeout=15)
+        except requests.exceptions.ReadTimeout:
+            break  # site too slow; fall through to next scraper
+        except requests.exceptions.RequestException:
+            break
         if r.status_code != 200:
             break
-        batch = r.json().get('products', [])
+        try:
+            batch = r.json().get('products', [])
+        except (json.JSONDecodeError, ValueError):
+            break  # site returned HTML/redirect, not Shopify JSON
         if not batch:
             break
         for p in batch:
@@ -464,14 +477,26 @@ def get_organic_products(website_url: str) -> list[dict]:
     """
     Scraping pipeline: Shopify → WooCommerce → generic HTML.
     Returns only products with 'organic' in the title.
+    Raises ScrapeError if all methods fail, so callers can record the failure
+    explicitly rather than treating it as "no organic products found."
     """
     all_products = scrape_shopify(website_url)
 
     if len(all_products) < 3:
-        all_products = scrape_woocommerce(website_url)
+        woo = scrape_woocommerce(website_url)
+        if woo:
+            all_products = woo
 
     if len(all_products) < 3:
-        all_products = scrape_generic(website_url)
+        generic = scrape_generic(website_url)
+        # scrape_generic returns an ERROR sentinel on network/HTTP failure
+        if generic and generic[0]['title'].startswith('ERROR:'):
+            if not all_products:
+                err_detail = generic[0]['title'][len('ERROR: '):]
+                raise ScrapeError(f"SCRAPE_FAILED: {err_detail}")
+            # else: we have some products from Shopify/WooCommerce; proceed
+        else:
+            all_products = generic
 
     return [
         p for p in all_products
@@ -705,7 +730,10 @@ def run_check(operation_name: str, website_url: str,
     _p(2, f"OID certificate loaded — {len(cert['products'])} certified products found")
     print(f"[2/4] Scraping website: {website_url}")
     _p(3, f"Scanning {website_url} for organic product claims…")
-    organic_on_site = get_organic_products(website_url)
+    try:
+        organic_on_site = get_organic_products(website_url)
+    except ScrapeError as e:
+        return {"error": str(e)}
 
     _p(4, f"Comparing {len(organic_on_site)} website products against "
           f"{len(cert['products'])} certified items…")
