@@ -4513,10 +4513,16 @@ def email_report(job_id):
         try:
             with db_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT report FROM job_history WHERE job_id = %s AND user_email = %s",
-                        (job_id, email)
-                    )
+                    if is_admin(email):
+                        cur.execute(
+                            "SELECT report FROM job_history WHERE job_id = %s",
+                            (job_id,)
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT report FROM job_history WHERE job_id = %s AND user_email = %s",
+                            (job_id, email)
+                        )
                     row = cur.fetchone()
                     if row and row[0]:
                         report = row[0]
@@ -4527,12 +4533,12 @@ def email_report(job_id):
     operation  = report.get('operation', 'Unknown Operation')
     report_url = f'{APP_BASE_URL}/job/{job_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
-    import threading
-    threading.Thread(
-        target=_smtp_send,
-        args=(REPORT_SMTP_USER, REPORT_SMTP_PASS, to_email, subject, html_body),
-        daemon=True
-    ).start()
+    # Try report@ first, fall back to hello@ — run synchronously so failures surface
+    ok = _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, to_email, subject, html_body)
+    if not ok:
+        ok = _smtp_send(HELLO_SMTP_USER, HELLO_SMTP_PASS, to_email, subject, html_body)
+    if not ok:
+        return jsonify({'ok': False, 'error': 'Email send failed — check server logs'}), 500
     return jsonify({'ok': True})
 
 
