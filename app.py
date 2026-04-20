@@ -1071,8 +1071,9 @@ GLOBAL_CSS = """
   /* ── Queue panel ─────────────────────────────────────────────────────── */
   .queue-panel {
     background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 20px; margin-bottom: 22px; overflow: hidden;
+    border-radius: 20px; margin-bottom: 22px;
     box-shadow: 0 8px 30px rgba(31,41,55,.06);
+    position: relative;
   }
   .queue-header {
     padding: 12px 20px;
@@ -1080,6 +1081,7 @@ GLOBAL_CSS = """
     font-size: .72rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: .09em; color: var(--primary);
     display: flex; align-items: center; gap: 8px;
+    border-radius: 20px 20px 0 0;
   }
   .queue-count {
     background: rgba(46,125,50,.12); color: var(--primary);
@@ -1091,7 +1093,7 @@ GLOBAL_CSS = """
     padding: 12px 20px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 12px; font-size: .875rem;
   }
-  .queue-item:last-child { border-bottom: none; }
+  .queue-item:last-child { border-bottom: none; border-radius: 0 0 20px 20px; }
   .op-name { font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .site    { font-size: .76rem; color: var(--muted); }
 
