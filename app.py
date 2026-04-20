@@ -1723,7 +1723,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ page_title }} — Organic Web Checker</title>
-  <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
+  <link rel="icon" type="image/png" href="/static/favicon.png?v=5">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -2172,7 +2172,7 @@ MAIN_HTML = """<!DOCTYPE html>
   <meta name="description" content="Compare your website's organic product claims against your live USDA Organic Integrity Database certificate. Surface items for review before they become issues.">
   <meta property="og:title" content="Organic Web Checker — Organic Compliance Review Tool">
   <meta property="og:description" content="AI-assisted review comparing organic website claims against live OID certificate data.">
-  <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
+  <link rel="icon" type="image/png" href="/static/favicon.png?v=5">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
