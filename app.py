@@ -157,9 +157,10 @@ def init_db():
                     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("DROP INDEX IF EXISTS uq_scheduled_active_slot")
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_scheduled_active_slot
-                ON scheduled_checks (scheduled_at)
+                ON scheduled_checks (user_email, scheduled_at)
                 WHERE status NOT IN ('cancelled')
             """)
             cur.execute("""
@@ -957,7 +958,7 @@ GLOBAL_CSS = """
   .header-logo {
     display: flex; align-items: center; gap: 10px; text-decoration: none;
   }
-  .header-logo-icon { width: 48px; height: 48px; flex-shrink: 0; }
+  .header-logo-icon { width: 48px; height: 48px; flex-shrink: 0; border-radius: 10px; }
   .header-wordmark  { font-size: 1rem; font-weight: 800; }
   header h1 { font-size: 1rem; font-weight: 800; }
   /* Two-color wordmark — "Organic" accent green, "Web Checker" white */
@@ -993,6 +994,7 @@ GLOBAL_CSS = """
     background: none; border: 1px solid rgba(255,255,255,.2); cursor: pointer;
     padding: 5px; border-radius: 9px; display: block;
     transition: border-color .15s, box-shadow .15s;
+    overflow: hidden;
   }
   .header-icon-btn:hover { border-color: rgba(255,255,255,.5); box-shadow: 0 0 0 3px rgba(255,255,255,.08); }
   .header-icon { width: 48px; height: 48px; display: block; }
@@ -1515,7 +1517,7 @@ GLOBAL_CSS = """
     header { padding: 10px 16px; gap: 8px; grid-template-columns: 1fr auto; }
     .header-nav { display: none; }
     .header-wordmark { font-size: .88rem; }
-    .header-logo-icon { width: 36px; height: 36px; }
+    .header-logo-icon { width: 36px; height: 36px; border-radius: 8px; }
     .header-icon { width: 36px; height: 36px; }
     .header-cta-btn { padding: 8px 14px; font-size: .8rem; }
     .nav-user-email { font-size: .75rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2389,6 +2391,30 @@ MAIN_HTML = """<!DOCTYPE html>
   .ai-card-title { font-size: .9rem; font-weight: 700; color: var(--text); margin-bottom: 6px; font-family: 'Manrope', system-ui, sans-serif; }
   .ai-card-desc  { font-size: .83rem; color: var(--muted); line-height: 1.6; }
 
+  /* Schedule button (purple) */
+  .btn-schedule {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 13px 24px; border-radius: 14px; font-weight: 700;
+    font-size: .92rem; cursor: pointer; text-decoration: none;
+    background: #7C3AED; color: #fff; border: none;
+    transition: background .15s, box-shadow .15s; width: 100%; margin-top: 10px;
+    box-shadow: 0 4px 14px rgba(124,58,237,.22); font-family: 'Manrope', system-ui, sans-serif;
+  }
+  .btn-schedule:hover { background: #6D28D9; box-shadow: 0 6px 20px rgba(124,58,237,.38); }
+
+  /* Email-to dropdown on queue items */
+  .email-dd { position: relative; display: inline-block; }
+  .email-dd-panel {
+    display: none; position: absolute; right: 0; top: calc(100% + 4px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 12px 14px; z-index: 200; min-width: 240px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.1);
+  }
+  .email-dd-panel.open { display: block; }
+  .email-dd-panel label { font-size: .74rem; }
+  .email-dd-panel input { margin-bottom: 10px; font-size: .82rem; padding: 8px 10px; }
+  .email-dd-send { font-size: .78rem; padding: 7px 16px; border-radius: 10px; }
+
   /* Run-check section */
   .run-check-section { padding: 96px 0; background: var(--bg); }
   .run-check-inner   { max-width: 640px; margin: 0 auto; padding: 0 24px; }
@@ -2754,6 +2780,7 @@ MAIN_HTML = """<!DOCTYPE html>
           Use cached OID data if available &mdash; skips live lookup (same cost, ~5s vs ~60s)
         </label>
         <button type="submit" id="submitBtn">Run Check</button>
+        <a href="/schedule" class="btn-schedule">&#128197; Schedule a Check</a>
       </form>
     </div>
 
@@ -2941,21 +2968,50 @@ MAIN_HTML = """<!DOCTYPE html>
       const viewBtn = (j.status === 'done' || j.status === 'error')
         ? '<button class="view-btn" onclick="showJob(\\'' + j.id + '\\')">View</button>' : '';
       const emailBtn = (j.status === 'done')
-        ? '<button class="view-btn" style="color:var(--primary);border-color:rgba(46,125,50,.25);margin-left:4px" onclick="emailReport(\\'' + j.id + '\\',this)">&#9993; Email</button>' : '';
+        ? '<span class="email-dd"><button class="view-btn" style="color:var(--primary);border-color:rgba(46,125,50,.25);margin-left:4px" onclick="toggleEmailDd(event,\\'' + j.id + '\\')">&#9993; Email</button>' +
+          '<div class="email-dd-panel" id="edd-' + j.id + '">' +
+            '<label>Send to</label>' +
+            '<input type="email" id="edd-to-' + j.id + '" placeholder="other@example.com">' +
+            '<div style="display:flex;gap:8px;align-items:center">' +
+              '<button class="btn-primary email-dd-send" onclick="sendEmailReport(\\'' + j.id + '\\',this)">Send</button>' +
+              '<a href="#" style="font-size:.74rem;color:var(--muted);text-decoration:none" onclick="closeEmailDd(\\'' + j.id + '\\');return false">Cancel</a>' +
+            '</div>' +
+          '</div></span>' : '';
       return '<li class="queue-item"><div><div class="op-name">' + j.operation + '</div><div class="site">' + j.website + '</div></div>' + pill + viewBtn + emailBtn + '</li>';
     }).join('');
   }
 
   async function showJob(jobId) { viewingJobId = jobId; await loadResult(jobId); }
 
-  async function emailReport(jobId, btn) {
+  function toggleEmailDd(e, jobId) {
+    e.stopPropagation();
+    document.querySelectorAll('.email-dd-panel').forEach(function(p){
+      if (p.id !== 'edd-' + jobId) p.classList.remove('open');
+    });
+    document.getElementById('edd-' + jobId).classList.toggle('open');
+  }
+  function closeEmailDd(jobId) { document.getElementById('edd-' + jobId).classList.remove('open'); }
+  document.addEventListener('click', function(){ document.querySelectorAll('.email-dd-panel').forEach(function(p){p.classList.remove('open');}); });
+
+  async function sendEmailReport(jobId, btn) {
+    const toInput = document.getElementById('edd-to-' + jobId);
+    const toEmail = (toInput ? toInput.value.trim() : '') || '';
     const orig = btn.textContent;
     btn.disabled = true; btn.textContent = 'Sending…';
     try {
-      const r = await fetch('/job/' + jobId + '/email-report', {method:'POST'});
+      const r = await fetch('/job/' + jobId + '/email-report', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(toEmail ? {to_email: toEmail} : {})
+      });
       const d = await r.json();
-      btn.textContent = d.ok ? '✓ Sent' : '✗ Failed';
-      if (!d.ok) setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+      if (d.ok) {
+        btn.textContent = '✓ Sent';
+        setTimeout(() => closeEmailDd(jobId), 1500);
+      } else {
+        btn.textContent = '✗ ' + (d.error || 'Failed');
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+      }
     } catch(e) { btn.textContent = '✗ Error'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000); }
   }
 
@@ -4442,10 +4498,12 @@ def download_pdf(job_id):
 
 @app.route('/job/<job_id>/email-report', methods=['POST'])
 def email_report(job_id):
-    """Email a completed instant-check report to the logged-in user."""
+    """Email a completed instant-check report. Sends to logged-in user or optional to_email."""
     email = get_logged_in_email()
     if not email:
         return jsonify({'ok': False, 'error': 'Sign in to email reports'}), 401
+    body_data  = request.get_json(force=True, silent=True) or {}
+    to_email   = (body_data.get('to_email') or '').strip() or email
     with jobs_lock:
         job = dict(jobs.get(job_id, {}))
     report = job.get('report') if job.get('status') == 'done' else None
@@ -4471,7 +4529,7 @@ def email_report(job_id):
     import threading
     threading.Thread(
         target=_smtp_send,
-        args=(REPORT_SMTP_USER, REPORT_SMTP_PASS, email, subject, html_body),
+        args=(REPORT_SMTP_USER, REPORT_SMTP_PASS, to_email, subject, html_body),
         daemon=True
     ).start()
     return jsonify({'ok': True})
@@ -5168,7 +5226,7 @@ def schedule_page_html(user_email: str) -> str:
         <div class="next-avail-arrow">&#8594;</div>
       </div>
 
-      <div style="font-size:.76rem;color:var(--muted);text-align:center;margin-bottom:12px">or choose a specific day</div>
+      <div style="font-size:.76rem;color:var(--muted);text-align:center;margin-bottom:12px">or choose a specific day &mdash; <span style="font-style:italic">times shown in your local timezone</span></div>
 
       <div class="day-tabs" id="dayTabs"></div>
 
@@ -5202,11 +5260,11 @@ def schedule_page_html(user_email: str) -> str:
       var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
       var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       for (var i = 0; i < 7; i++) {
-        var d = new Date(now);
-        d.setDate(d.getDate() + i);
+        // Use UTC date so tab dates align with UTC-based slot ISO strings
+        var d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i));
         var label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
-                    days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate();
-        var ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                    days[d.getUTCDay()] + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCDate();
+        var ds = d.toISOString().slice(0, 10);
         var btn = document.createElement('button');
         btn.className = 'day-tab' + (i === 0 ? ' active' : '');
         btn.textContent = label;
@@ -5244,32 +5302,36 @@ def schedule_page_html(user_email: str) -> str:
     }
 
     function renderSlotGrid(dateStr, bookedSet) {
-      var grid = document.getElementById('slotGrid');
-      var now  = new Date();
-      var cutoff = new Date(now.getTime() + 5 * 60000); // 5 min from now
+      var grid   = document.getElementById('slotGrid');
+      var wrap   = document.querySelector('.slot-wrap');
+      var now    = new Date();
+      var cutoff = new Date(now.getTime() + 5 * 60000);
       grid.innerHTML = '';
+      var firstAvailTop = null;
       for (var hour = 0; hour < 24; hour++) {
         var row = document.createElement('div');
         row.className = 'hour-row';
         var lbl = document.createElement('div');
         lbl.className = 'hour-label';
-        lbl.textContent = (hour === 0 ? '12' : hour <= 12 ? hour : hour - 12) +
-                          ':00 ' + (hour < 12 ? 'AM' : 'PM');
+        var lblDt = new Date(dateStr + 'T' + String(hour).padStart(2,'0') + ':00:00Z');
+        lbl.textContent = lblDt.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
         row.appendChild(lbl);
         var slotsDiv = document.createElement('div');
         slotsDiv.className = 'hour-slots';
         for (var m = 0; m < 60; m += 10) {
-          var isoStr = dateStr + 'T' + String(hour).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':00Z';
+          var isoStr  = dateStr + 'T' + String(hour).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':00Z';
           var slotDt  = new Date(isoStr);
-          var isPast   = slotDt < cutoff;
+          var isPast  = slotDt < cutoff;
           var isBooked = bookedSet.has(isoStr);
-          var isSel    = _selectedSlot === isoStr;
+          var isSel   = _selectedSlot === isoStr;
           var btn = document.createElement('button');
           btn.className = 'slot-btn ' + (isSel ? 'selected' : isPast ? 'past' : isBooked ? 'booked' : 'avail');
-          btn.textContent = String(hour === 0 || hour === 12 ? 12 : hour % 12).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+          btn.dataset.iso = isoStr;
+          btn.textContent = slotDt.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
           btn.disabled = isPast || isBooked;
           if (!isPast && !isBooked) {
             btn.onclick = (function(iso){return function(){selectSlot(iso);};})(isoStr);
+            if (firstAvailTop === null) firstAvailTop = row.offsetTop;
           }
           slotsDiv.appendChild(btn);
         }
@@ -5278,9 +5340,8 @@ def schedule_page_html(user_email: str) -> str:
       }
       document.getElementById('slotLoading').style.display = 'none';
       grid.style.display = '';
-      // Scroll to first available slot
-      var firstAvail = grid.querySelector('.avail');
-      if (firstAvail) firstAvail.scrollIntoView({block:'nearest'});
+      // Scroll container to first available slot
+      if (wrap && firstAvailTop !== null) wrap.scrollTop = firstAvailTop;
     }
 
     function fmtSlot(isoStr) {
@@ -5294,11 +5355,9 @@ def schedule_page_html(user_email: str) -> str:
     function selectSlot(isoStr) {
       _selectedSlot = isoStr;
       document.querySelectorAll('.slot-btn').forEach(function(b){
-        b.classList.remove('selected');
-        if (!b.disabled) b.className = b.className.replace('selected','avail');
+        if (b.disabled) return;
+        b.className = 'slot-btn ' + (b.dataset.iso === isoStr ? 'selected' : 'avail');
       });
-      // Find and highlight the selected button
-      loadActiveDay();
       var disp = document.getElementById('selectedDisplay');
       disp.style.display = '';
       document.getElementById('selectedSlotText').textContent = fmtSlot(isoStr);
@@ -5314,17 +5373,20 @@ def schedule_page_html(user_email: str) -> str:
 
     function selectNextAvailable() {
       if (!_nextAvailIso) return;
-      // Switch to the correct day tab
-      var d = new Date(_nextAvailIso);
-      var ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      // _nextAvailIso is UTC; extract UTC date for the tab lookup
+      var ds = _nextAvailIso.slice(0, 10);
+      var found = false;
       document.querySelectorAll('.day-tab').forEach(function(t){
         if (t.dataset.date === ds) {
           document.querySelectorAll('.day-tab').forEach(function(x){x.classList.remove('active');});
           t.classList.add('active');
+          found = true;
         }
       });
-      loadSlots(ds);
       _selectedSlot = _nextAvailIso;
+      if (found) {
+        loadSlots(ds); // grid re-renders with _selectedSlot already set — correct slot highlighted
+      }
       var disp = document.getElementById('selectedDisplay');
       disp.style.display = '';
       document.getElementById('selectedSlotText').textContent = fmtSlot(_nextAvailIso);
@@ -5422,10 +5484,7 @@ def schedule_page_html(user_email: str) -> str:
 
     // ── Init ──────────────────────────────────────────────────────────────
     buildDayTabs();
-    var todayStr = (function(){
-      var d = new Date();
-      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-    })();
+    var todayStr = new Date().toISOString().slice(0, 10);
     loadSlots(todayStr);
     loadMyChecks();
     </script>"""
