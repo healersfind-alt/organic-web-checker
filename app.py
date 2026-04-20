@@ -956,9 +956,10 @@ GLOBAL_CSS = """
     position: sticky; top: 0; z-index: 100;
   }
   .header-logo {
-    display: flex; align-items: center; gap: 10px; text-decoration: none;
+    display: flex; align-items: center; gap: 12px; text-decoration: none;
+    overflow: hidden;
   }
-  .header-logo-icon { width: 48px; height: 48px; flex-shrink: 0; border-radius: 10px; }
+  .header-logo-icon { width: 144px; height: 144px; flex-shrink: 0; border-radius: 14px; }
   .header-wordmark  { font-size: 1rem; font-weight: 800; }
   header h1 { font-size: 1rem; font-weight: 800; }
   /* Two-color wordmark — "Organic" accent green, "Web Checker" white */
@@ -1517,7 +1518,7 @@ GLOBAL_CSS = """
     header { padding: 10px 16px; gap: 8px; grid-template-columns: 1fr auto; }
     .header-nav { display: none; }
     .header-wordmark { font-size: .88rem; }
-    .header-logo-icon { width: 36px; height: 36px; border-radius: 8px; }
+    .header-logo-icon { width: 72px; height: 72px; border-radius: 10px; }
     .header-icon { width: 36px; height: 36px; }
     .header-cta-btn { padding: 8px 14px; font-size: .8rem; }
     .nav-user-email { font-size: .75rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1731,7 +1732,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
 <body>
 <header>
   <a href="/" class="header-logo">
-    <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
+    <img src="/static/icon-header.png" class="header-logo-icon" alt="Organic Web Checker">
     <span class="header-wordmark"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></span>
   </a>
   <nav class="header-nav">
@@ -1753,7 +1754,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
     <a href="/#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
-        <img src="/static/icon.png" class="header-icon" alt="">
+        <img src="/static/icon-header.png" class="header-icon" alt="">
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
@@ -2479,7 +2480,7 @@ MAIN_HTML = """<!DOCTYPE html>
 
 <header>
   <a href="/" class="header-logo">
-    <img src="/static/icon.png" class="header-logo-icon" alt="Organic Web Checker">
+    <img src="/static/icon-header.png" class="header-logo-icon" alt="Organic Web Checker">
     <span class="header-wordmark"><span class="wm-organic">Organic</span> <span class="wm-checker">Web Checker</span></span>
   </a>
   <nav class="header-nav">
@@ -2501,7 +2502,7 @@ MAIN_HTML = """<!DOCTYPE html>
     <a href="#run-check" class="header-cta-btn">Run a Check</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
-        <img src="/static/icon.png" class="header-icon" alt="">
+        <img src="/static/icon-header.png" class="header-icon" alt="">
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
