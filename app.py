@@ -172,8 +172,12 @@ def init_db():
                     flags        INTEGER DEFAULT 0,
                     caution      INTEGER DEFAULT 0,
                     submitted_at TIMESTAMPTZ,
-                    finished_at  TIMESTAMPTZ DEFAULT NOW()
+                    finished_at  TIMESTAMPTZ DEFAULT NOW(),
+                    report       JSONB
                 )
+            """)
+            cur.execute("""
+                ALTER TABLE job_history ADD COLUMN IF NOT EXISTS report JSONB
             """)
         conn.commit()
 
@@ -769,13 +773,14 @@ def _run_job(job_id: str, operation: str, website: str, use_cache: bool = False)
                             cur.execute("""
                                 INSERT INTO job_history
                                     (job_id, user_email, operation, website, status, flags, caution,
-                                     submitted_at, finished_at)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                     submitted_at, finished_at, report)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                                 ON CONFLICT (job_id) DO NOTHING
                             """, (
                                 job_id, j.get('user_email', ''), operation, website,
                                 j.get('status', 'error'), flags, caution,
                                 j.get('submitted_at'), j.get('finished_at'),
+                                json.dumps(report) if 'error' not in report else None,
                             ))
                         conn.commit()
                 except Exception as _he:
@@ -4443,9 +4448,23 @@ def email_report(job_id):
         return jsonify({'ok': False, 'error': 'Sign in to email reports'}), 401
     with jobs_lock:
         job = dict(jobs.get(job_id, {}))
-    if not job or job.get('status') != 'done' or 'error' in job.get('report', {}):
+    report = job.get('report') if job.get('status') == 'done' else None
+    if report is None or 'error' in report:
+        # job not in memory (app restarted) — try DB
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT report FROM job_history WHERE job_id = %s AND user_email = %s",
+                        (job_id, email)
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        report = row[0]
+        except Exception:
+            pass
+    if not report or 'error' in report:
         return jsonify({'ok': False, 'error': 'Report not ready'}), 400
-    report     = job['report']
     operation  = report.get('operation', 'Unknown Operation')
     report_url = f'{APP_BASE_URL}/job/{job_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
