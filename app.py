@@ -455,7 +455,7 @@ def _smtp_send(smtp_user: str, smtp_pass: str, to_email: str, subject: str, html
     msg['To']      = to_email
     msg.attach(MIMEText(html_body, 'html'))
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
             s.ehlo()
             s.starttls()
             s.login(smtp_user, smtp_pass)
@@ -4449,10 +4449,13 @@ def email_report(job_id):
     operation  = report.get('operation', 'Unknown Operation')
     report_url = f'{APP_BASE_URL}/job/{job_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
-    ok = _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, email, subject, html_body)
-    if ok:
-        return jsonify({'ok': True})
-    return jsonify({'ok': False, 'error': 'Email failed — check Railway logs'}), 500
+    import threading
+    threading.Thread(
+        target=_smtp_send,
+        args=(REPORT_SMTP_USER, REPORT_SMTP_PASS, email, subject, html_body),
+        daemon=True
+    ).start()
+    return jsonify({'ok': True})
 
 
 @app.route('/pricing')
