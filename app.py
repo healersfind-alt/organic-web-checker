@@ -180,6 +180,9 @@ def init_db():
             cur.execute("""
                 ALTER TABLE job_history ADD COLUMN IF NOT EXISTS report JSONB
             """)
+            cur.execute("""
+                ALTER TABLE scheduled_checks ADD COLUMN IF NOT EXISTS report_format TEXT DEFAULT 'html'
+            """)
         conn.commit()
 
 try:
@@ -522,6 +525,47 @@ def _send_report_email(user_email: str, operation: str, check_id: str, report: d
     return _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, user_email, subject, html_body)
 
 
+def _send_report_email_md(user_email: str, operation: str, check_id: str, report: dict) -> bool:
+    """Send report as a .md file attachment."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
+    if not REPORT_SMTP_PASS:
+        return False
+    md_text  = report_to_markdown(report)
+    flags    = len(report.get('flagged', []))
+    caution  = len(report.get('caution', []))
+    subject  = f'Organic Web Checker — {operation} ({flags} flags, {caution} cautions)'
+    filename = f'owc-report-{check_id}.md'
+    report_url = f'{APP_BASE_URL}/scheduled-report/{check_id}'
+    body_html = f'<p>Your scheduled check for <strong>{operation}</strong> is complete.</p>' \
+                f'<p>{flags} flag(s) · {caution} caution(s)</p>' \
+                f'<p><a href="{report_url}">View full report online</a></p>' \
+                f'<p>Markdown report attached.</p>'
+    msg = MIMEMultipart()
+    msg['Subject'] = subject
+    msg['From']    = f'Organic Web Checker <{REPORT_SMTP_USER}>'
+    msg['To']      = user_email
+    msg.attach(MIMEText(body_html, 'html'))
+    part = MIMEBase('application', 'octet-stream')
+    part.set_payload(md_text.encode('utf-8'))
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+    msg.attach(part)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+            s.ehlo(); s.starttls()
+            s.login(REPORT_SMTP_USER, REPORT_SMTP_PASS)
+            s.sendmail(REPORT_SMTP_USER, user_email, msg.as_string())
+        print(f'[EMAIL] MD report sent to {user_email}: {subject}')
+        return True
+    except Exception as exc:
+        print(f'[EMAIL] MD send error: {exc}')
+        return False
+
+
 def _send_welcome_email(to_email: str) -> bool:
     """Send a welcome email from hello@organicwebchecker.com on new account creation."""
     html_body = f"""<!DOCTYPE html>
@@ -604,7 +648,7 @@ def _run_cert_verify(request_id: str, org_name: str, db_id: int):
     print(f'[CERT VERIFY] {org_name} → {result} (db_id={db_id})')
 
 
-def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: str):
+def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: str, report_format: str = 'html'):
     """Wrapper: creates a job, runs it, saves result to DB, sends email."""
     job_id = uuid.uuid4().hex[:8]
     with jobs_lock:
@@ -648,8 +692,11 @@ def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: 
             print(f'[SCHED] result save failed: {e}')
     # Send email on success
     if status == 'done':
-        _send_report_email(user_email, operation, check_id, report)
-    print(f'[SCHED] check_id={check_id} status={status} op={operation}')
+        if report_format == 'md':
+            _send_report_email_md(user_email, operation, check_id, report)
+        else:
+            _send_report_email(user_email, operation, check_id, report)
+    print(f'[SCHED] check_id={check_id} status={status} op={operation} fmt={report_format}')
 
 
 def _scheduler_loop():
@@ -661,14 +708,15 @@ def _scheduler_loop():
                 with db_conn() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
-                            """SELECT id, user_email, operation_name, website_url
+                            """SELECT id, user_email, operation_name, website_url,
+                                      COALESCE(report_format, 'html')
                                FROM scheduled_checks
                                WHERE status = 'scheduled' AND scheduled_at <= NOW()
                                ORDER BY scheduled_at LIMIT 5"""
                         )
                         rows = cur.fetchall()
                 for row in rows:
-                    check_id, user_email, operation, website = row
+                    check_id, user_email, operation, website, report_format = row
                     # Atomic claim — prevents double-fire on restart
                     with db_conn() as conn:
                         with conn.cursor() as cur:
@@ -682,10 +730,10 @@ def _scheduler_loop():
                     if claimed:
                         threading.Thread(
                             target=_run_scheduled_job,
-                            args=(check_id, user_email, operation, website),
+                            args=(check_id, user_email, operation, website, report_format),
                             daemon=True
                         ).start()
-                        print(f'[SCHED] Fired check_id={check_id} op={operation}')
+                        print(f'[SCHED] Fired check_id={check_id} op={operation} fmt={report_format}')
             except Exception as e:
                 print(f'[SCHED] Loop error: {e}')
         time.sleep(60)
@@ -1933,9 +1981,9 @@ REPORT_PARTIAL = """
       by upstream certified supplier documentation in the Organic System Plan (OSP).
     {% else %}
       This operation is certified as a <strong>handler</strong> (processor, distributor, broker, or importer).
-      Handler certificates typically list products at a general category level (e.g., &ldquo;Organic Eggs&rdquo;).
-      Specific SKU-level products are in the operation&rsquo;s <strong>Organic System Plan (OSP)</strong>
-      held by their certifier &mdash; not publicly visible in OID.
+      Some handler certificates list products at a general category level (e.g., &ldquo;Organic Eggs&rdquo;);
+      others list specific products. Detailed product and supplier information is in the operation&rsquo;s
+      <strong>Organic System Plan (OSP)</strong> held by their certifier &mdash; not publicly visible in OID.
     {% endif %}<br>
     <span style="color:var(--muted);font-size:.72rem">
       Flagged items below indicate products not found on this operation&rsquo;s OID certificate.
@@ -3640,8 +3688,8 @@ ABOUT_BODY = """
     under their own label. Under USDA NOP (7&nbsp;CFR&nbsp;&sect;&nbsp;205.101) and the
     Strengthening Organic Enforcement rule (eff.&nbsp;March&nbsp;19,&nbsp;2024), all entities that make or use
     an organic claim &mdash; including brand owners who source from upstream certified suppliers rather than
-    producing themselves &mdash; must hold organic handler certification. Their OID certificate typically lists
-    authorized product categories; the full product and supplier detail is documented in their
+    producing themselves &mdash; must hold organic handler certification. Some OID certificates list
+    general product categories; others list specific products. Full product and supplier detail is documented in their
     <strong>Organic System Plan (OSP)</strong> on file with their certifying agent, not publicly visible in the OID.
   </div>
   <div class="about-p" style="font-size:.8rem;color:var(--muted)">
@@ -5227,6 +5275,15 @@ def schedule_page_html(user_email: str) -> str:
     </div>
 
     <div class="card">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Report Delivery</div>
+      <div style="display:flex;gap:20px;margin-bottom:16px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+          <input type="radio" name="rptFmt" value="html" checked> Email (HTML)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+          <input type="radio" name="rptFmt" value="md"> Email + Markdown (.md)
+        </label>
+      </div>
       <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" disabled style="width:100%;opacity:.5">Confirm Booking</button>
       <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 Checker burned when your report runs &mdash; not at booking</div>
     </div>
@@ -5239,6 +5296,7 @@ def schedule_page_html(user_email: str) -> str:
     <script>
     var _selectedSlot = null;
     var _nextAvailIso = null;
+    var _initialLoad  = true;
 
     // ── Day tabs ──────────────────────────────────────────────────────────
     function buildDayTabs() {
@@ -5279,7 +5337,20 @@ def schedule_page_html(user_email: str) -> str:
           if (data.next_available && !_selectedSlot) {
             _nextAvailIso = data.next_available;
             document.getElementById('nextAvailTime').textContent = fmtSlot(data.next_available);
+            // On first load: if next available slot is on a different day, auto-switch to that day
+            if (_initialLoad) {
+              _initialLoad = false;
+              var nextDs = data.next_available.slice(0, 10);
+              if (nextDs !== dateStr) {
+                document.querySelectorAll('.day-tab').forEach(function(t){
+                  t.classList.toggle('active', t.dataset.date === nextDs);
+                });
+                loadSlots(nextDs);
+                return;
+              }
+            }
           }
+          _initialLoad = false;
           renderSlotGrid(dateStr, booked);
         })
         .catch(function(){
@@ -5393,10 +5464,12 @@ def schedule_page_html(user_email: str) -> str:
       var btn = document.getElementById('confirmBtn');
       btn.disabled = true; btn.textContent = 'Booking\u2026';
       try {
+        var fmt = document.querySelector('input[name="rptFmt"]:checked');
+        var report_format = fmt ? fmt.value : 'html';
         var res = await fetch('/api/schedule-check', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({operation: op, website: url, scheduled_at: _selectedSlot})
+          body: JSON.stringify({operation: op, website: url, scheduled_at: _selectedSlot, report_format: report_format})
         });
         var data = await res.json();
         if (data.ok) {
@@ -5504,10 +5577,13 @@ def api_schedule_check():
         return jsonify({'error': 'Sign in required'}), 401
     if not is_admin(email) and get_user_credits(email) < 1:
         return jsonify({'error': 'No credits remaining. Purchase credits to schedule checks.'}), 402
-    data         = request.get_json(force=True) or {}
-    operation    = data.get('operation', '').strip()
-    website      = data.get('website', '').strip()
-    scheduled_at = data.get('scheduled_at', '').strip()
+    data          = request.get_json(force=True) or {}
+    operation     = data.get('operation', '').strip()
+    website       = data.get('website', '').strip()
+    scheduled_at  = data.get('scheduled_at', '').strip()
+    report_format = data.get('report_format', 'html').strip()
+    if report_format not in ('html', 'md'):
+        report_format = 'html'
     if not operation or not website or not scheduled_at:
         return jsonify({'error': 'operation, website, and scheduled_at are required'}), 400
     if not website.startswith('http'):
@@ -5526,9 +5602,10 @@ def api_schedule_check():
         with db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """INSERT INTO scheduled_checks (id, user_email, operation_name, website_url, scheduled_at)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (check_id, email, operation, website, slot_dt)
+                    """INSERT INTO scheduled_checks
+                       (id, user_email, operation_name, website_url, scheduled_at, report_format)
+                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (check_id, email, operation, website, slot_dt, report_format)
                 )
             conn.commit()
     except psycopg2.IntegrityError:
