@@ -446,14 +446,14 @@ def get_next_available_slot() -> datetime | None:
     return None
 
 
-def _smtp_send(smtp_user: str, smtp_pass: str, to_email: str, subject: str, html_body: str) -> bool:
-    """Send an email via Gmail SMTP. Returns True on success."""
+def _smtp_send(smtp_user: str, smtp_pass: str, to_email: str, subject: str, html_body: str):
+    """Send an email via Gmail SMTP. Returns True on success, None if no password, error str on failure."""
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     if not smtp_pass:
         print(f'[EMAIL] No app password set for {smtp_user} — skipping send to {to_email}')
-        return False
+        return None
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From']    = f'Organic Web Checker <{smtp_user}>'
@@ -468,8 +468,9 @@ def _smtp_send(smtp_user: str, smtp_pass: str, to_email: str, subject: str, html
         print(f'[EMAIL] Sent from {smtp_user} to {to_email}: {subject}')
         return True
     except Exception as exc:
-        print(f'[EMAIL] SMTP error ({smtp_user} → {to_email}): {exc}')
-        return False
+        err = str(exc)
+        print(f'[EMAIL] SMTP error ({smtp_user} → {to_email}): {err}')
+        return err
 
 
 def _build_report_html(operation: str, report: dict, report_url: str) -> tuple[str, str]:
@@ -4535,12 +4536,13 @@ def email_report(job_id):
     operation  = report.get('operation', 'Unknown Operation')
     report_url = f'{APP_BASE_URL}/job/{job_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
-    # Try report@ first, fall back to hello@ — run synchronously so failures surface
-    ok = _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, to_email, subject, html_body)
-    if not ok:
-        ok = _smtp_send(HELLO_SMTP_USER, HELLO_SMTP_PASS, to_email, subject, html_body)
-    if not ok:
-        return jsonify({'ok': False, 'error': 'Email send failed — check server logs'}), 500
+    # Try report@ first, fall back to hello@ — synchronous so failures surface to the user
+    r1 = _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, to_email, subject, html_body)
+    if r1 is not True:
+        r2 = _smtp_send(HELLO_SMTP_USER, HELLO_SMTP_PASS, to_email, subject, html_body)
+        if r2 is not True:
+            detail = (r1 or r2) if isinstance(r1, str) or isinstance(r2, str) else 'No app password configured'
+            return jsonify({'ok': False, 'error': f'Send failed: {detail}'}), 500
     return jsonify({'ok': True})
 
 
@@ -4960,6 +4962,19 @@ def admin_certifier_status(req_id):
         return jsonify({'ok': True})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/test-email')
+def admin_test_email():
+    if get_logged_in_email() != ADMIN_EMAIL:
+        return 'Unauthorized', 403
+    lines = ['<h2>SMTP Test</h2><pre>']
+    for user, pw in [(REPORT_SMTP_USER, REPORT_SMTP_PASS), (HELLO_SMTP_USER, HELLO_SMTP_PASS)]:
+        r = _smtp_send(user, pw, ADMIN_EMAIL, 'OWC SMTP Test', f'<p>Test from {user}</p>')
+        status = 'OK ✓' if r is True else (f'FAIL: {r}' if isinstance(r, str) else 'SKIP: no password')
+        lines.append(f'{user}  →  {status}')
+    lines.append('</pre><p>Check healersfind@gmail.com for test messages.</p>')
+    return '\n'.join(lines)
 
 
 # ---------------------------------------------------------------------------
