@@ -2407,17 +2407,6 @@ MAIN_HTML = """<!DOCTYPE html>
   .btn-schedule:hover { background: #6D28D9; box-shadow: 0 6px 20px rgba(124,58,237,.38); }
 
   /* Email-to dropdown on queue items */
-  .email-dd { position: relative; display: inline-block; }
-  .email-dd-panel {
-    display: none; position: absolute; right: 0; top: calc(100% + 4px);
-    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-    padding: 12px 14px; z-index: 200; min-width: 240px;
-    box-shadow: 0 8px 24px rgba(0,0,0,.1);
-  }
-  .email-dd-panel.open { display: block; }
-  .email-dd-panel label { font-size: .74rem; }
-  .email-dd-panel input { margin-bottom: 10px; font-size: .82rem; padding: 8px 10px; }
-  .email-dd-send { font-size: .78rem; padding: 7px 16px; border-radius: 10px; }
 
   /* Run-check section */
   .run-check-section { padding: 96px 0; background: var(--bg); }
@@ -2972,49 +2961,24 @@ MAIN_HTML = """<!DOCTYPE html>
       const viewBtn = (j.status === 'done' || j.status === 'error')
         ? '<button class="view-btn" onclick="showJob(\\'' + j.id + '\\')">View</button>' : '';
       const emailBtn = (j.status === 'done')
-        ? '<span class="email-dd"><button class="view-btn" style="color:var(--primary);border-color:rgba(46,125,50,.25);margin-left:4px" onclick="toggleEmailDd(event,\\'' + j.id + '\\')">&#9993; Email</button>' +
-          '<div class="email-dd-panel" id="edd-' + j.id + '">' +
-            '<label>Send to</label>' +
-            '<input type="email" id="edd-to-' + j.id + '" placeholder="other@example.com">' +
-            '<div style="display:flex;gap:8px;align-items:center">' +
-              '<button class="btn-primary email-dd-send" onclick="sendEmailReport(\\'' + j.id + '\\',this)">Send</button>' +
-              '<a href="#" style="font-size:.74rem;color:var(--muted);text-decoration:none" onclick="closeEmailDd(\\'' + j.id + '\\');return false">Cancel</a>' +
-            '</div>' +
-          '</div></span>' : '';
+        ? '<button class="view-btn" style="color:var(--primary);border-color:rgba(46,125,50,.25);margin-left:4px" id="ebtn-' + j.id + '" onclick="emailReport(\\'' + j.id + '\\',this)">&#9993; Email</button>' : '';
       return '<li class="queue-item"><div><div class="op-name">' + j.operation + '</div><div class="site">' + j.website + '</div></div>' + pill + viewBtn + emailBtn + '</li>';
     }).join('');
   }
 
   async function showJob(jobId) { viewingJobId = jobId; await loadResult(jobId); }
 
-  function toggleEmailDd(e, jobId) {
-    e.stopPropagation();
-    document.querySelectorAll('.email-dd-panel').forEach(function(p){
-      if (p.id !== 'edd-' + jobId) p.classList.remove('open');
-    });
-    document.getElementById('edd-' + jobId).classList.toggle('open');
-  }
-  function closeEmailDd(jobId) { document.getElementById('edd-' + jobId).classList.remove('open'); }
-  document.addEventListener('click', function(){ document.querySelectorAll('.email-dd-panel').forEach(function(p){p.classList.remove('open');}); });
-
-  async function sendEmailReport(jobId, btn) {
-    const toInput = document.getElementById('edd-to-' + jobId);
-    const toEmail = (toInput ? toInput.value.trim() : '') || '';
+  async function emailReport(jobId, btn) {
     const orig = btn.textContent;
     btn.disabled = true; btn.textContent = 'Sending…';
     try {
-      const r = await fetch('/job/' + jobId + '/email-report', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(toEmail ? {to_email: toEmail} : {})
-      });
+      const r = await fetch('/job/' + jobId + '/email-report', {method: 'POST'});
       const d = await r.json();
       if (d.ok) {
         btn.textContent = '✓ Sent';
-        setTimeout(() => closeEmailDd(jobId), 1500);
       } else {
         btn.textContent = '✗ ' + (d.error || 'Failed');
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 4000);
       }
     } catch(e) { btn.textContent = '✗ Error'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000); }
   }

@@ -87,7 +87,7 @@ def extract_ingredient_key(product_title: str) -> str:
 
 CERT_QUALIFIERS = re.compile(
     r'\b(extra virgin|virgin|high oleic|ala \d+%?|roman|sweet|moroccan|mct|'
-    r'refined|unrefined|raw|cold pressed|steam distilled|expeller pressed)\b',
+    r'refined|unrefined|raw|cold pressed|steam distilled|expeller pressed|essential)\b',
     re.IGNORECASE
 )
 
@@ -96,39 +96,72 @@ def cert_core(cert_item: str) -> str:
     Strip qualifiers from a cert item to get the core ingredient name.
     'Avocado Oil – Extra Virgin' → 'avocado oil'
     'Flax Seed Oil – ALA 50%' → 'flax seed oil'
+    'Lavender Essential Oil (Lavandin Grosso)' → 'lavender oil lavandin grosso'
     """
     t = cert_item.lower()
     t = re.sub(r'\s*[–-]\s*.*', '', t)       # strip everything after dash/em-dash
     t = CERT_QUALIFIERS.sub(' ', t)
-    t = re.sub(r'[^a-z\s]', ' ', t)
+    t = re.sub(r'[^a-z\s]', ' ', t)          # remove parens, punctuation
     return re.sub(r'\s+', ' ', t).strip()
+
+
+def _cert_base(cert_item: str) -> str:
+    """cert_core applied to only the part before any parenthetical."""
+    base = re.sub(r'\s*\(.*?\)\s*', ' ', cert_item).strip()
+    return cert_core(base)
+
+
+def _cert_paren(cert_item: str) -> str | None:
+    """Return cert_core of parenthetical content if it has 2+ words, else None.
+    'Lavender Essential Oil (Lavandin Grosso)' → 'lavandin grosso'
+    'Lavender Essential Oil (Bulgarian)' → None  (single word, too broad)
+    """
+    m = re.search(r'\(([^)]+)\)', cert_item)
+    if not m:
+        return None
+    paren = m.group(1).strip()
+    if len(paren.split()) < 2:
+        return None
+    return cert_core(paren)
 
 
 def is_match(website_title: str, cert_item: str) -> bool:
     """
     Returns True if the website product title matches the cert item.
 
-    Strategy:
-    1. Normalize both to remove spaces/hyphens (flaxseed == flax seed).
-    2. Check if the cert's core ingredient appears anywhere in the
-       normalized website title, or vice versa.
+    Strategies (in order):
+    1. Full cert_core substring match (handles space/hyphen variants).
+    2. Word-level: every significant word in cert core appears in website.
+    3. Base-only match: cert without parenthetical variety qualifier.
+       e.g. website 'Lavender Oil' matches cert 'Lavender Essential Oil (Bulgarian)'
+    4. Parenthetical match (2+ word varieties only): website contains the
+       variety name from the cert parenthetical.
+       e.g. website 'Lavandin Grosso' matches cert 'Lavender Essential Oil (Lavandin Grosso)'
     """
-    # Normalize cert to its core ingredient (no qualifiers, no dashes)
-    core = normalize(cert_core(cert_item))
-
-    # Normalize the website title — keep all words, just collapse spacing
     web_norm = normalize(website_title)
 
-    # Direct substring match (handles space/hyphen variants)
+    # Strategy 1 — full core substring
+    core = normalize(cert_core(cert_item))
     if core and (core in web_norm or web_norm in core):
         return True
 
-    # Word-level match: every significant word in cert core must appear
-    # somewhere in the website title's normalized form
+    # Strategy 2 — word-level (every significant cert word in website)
     core_words = [w for w in cert_core(cert_item).split() if len(w) > 2
                   and w not in ('oil', 'seed', 'butter', 'essential')]
     if core_words and all(normalize(w) in web_norm for w in core_words):
         return True
+
+    # Strategy 3 — base product without variety parenthetical
+    base = normalize(_cert_base(cert_item))
+    if base and base != core and (base in web_norm or web_norm in base):
+        return True
+
+    # Strategy 4 — multi-word parenthetical variety (e.g. 'Lavandin Grosso')
+    paren = _cert_paren(cert_item)
+    if paren:
+        paren_norm = normalize(paren)
+        if paren_norm and (paren_norm in web_norm or web_norm in paren_norm):
+            return True
 
     return False
 
