@@ -262,6 +262,32 @@ def generate_api_key(email: str, name: str = '') -> dict:
     return {'key_id': key_id, 'raw_key': raw_key}
 
 
+def _get_api_key_from_request() -> str | None:
+    """Extract raw API key from Authorization: Bearer or X-API-Key header."""
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        return auth[7:].strip() or None
+    return request.headers.get('X-API-Key', '').strip() or None
+
+
+def _api_rate_limit_ok(email: str, per_hour: int = 60) -> bool:
+    """Return True if fewer than per_hour jobs were submitted in the last hour."""
+    if not DATABASE_URL:
+        return True
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COUNT(*) FROM job_history
+                       WHERE user_email = %s AND submitted_at > NOW() - INTERVAL '1 hour'""",
+                    (email.lower(),)
+                )
+                row = cur.fetchone()
+        return (row[0] if row else 0) < per_hour
+    except Exception:
+        return True  # fail open on DB error
+
+
 def verify_api_key(raw_key: str) -> str | None:
     """Return the email associated with a valid API key, or None."""
     if not raw_key or not DATABASE_URL:
@@ -2909,6 +2935,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <a href="/pricing">Pricing</a>
       <a href="/history">History</a>
       <a href="/agents">Agents &amp; API</a>
+      <a href="/api">API Docs</a>
     </div>
     <div class="footer-col">
       <h4>Account</h4>
@@ -3470,7 +3497,7 @@ ACCOUNT_BODY = """
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <div>
           <div style="font-size:.9rem;font-weight:800;color:var(--text)">API Keys</div>
-          <div style="font-size:.75rem;color:var(--muted);margin-top:2px">Use these keys to call the checker programmatically or via AI agents</div>
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px">Use these keys to call the checker programmatically &mdash; <a href="/api" style="color:var(--primary)">API docs</a></div>
         </div>
         <button id="apiKeyCreateBtn" onclick="apiKeyCreate()" style="font-size:.8rem;font-weight:700;padding:8px 18px;background:#6F5EF7;color:#fff;border:none;border-radius:12px;cursor:pointer;box-shadow:0 4px 12px rgba(111,94,247,.2)">+ New Key</button>
       </div>
@@ -4112,6 +4139,264 @@ def api_queue_depth():
         except Exception:
             pass
     return jsonify({'depth': depth})
+
+
+# ---------------------------------------------------------------------------
+# REST API v1 — key-authenticated, JSON in/out
+# ---------------------------------------------------------------------------
+
+@app.route('/api/v1/status')
+def api_v1_status():
+    raw_key = _get_api_key_from_request()
+    email   = verify_api_key(raw_key) if raw_key else None
+    if not email:
+        return jsonify({'ok': False, 'error': 'Invalid or missing API key'}), 401
+    credits = get_user_credits(email)
+    return jsonify({
+        'ok':          True,
+        'email':       email,
+        'credits':     credits,
+        'rate_limit':  '60 checks per rolling hour',
+        'docs':        f'{APP_BASE_URL}/api',
+    })
+
+
+@app.route('/api/v1/check', methods=['POST'])
+def api_v1_check_submit():
+    raw_key = _get_api_key_from_request()
+    email   = verify_api_key(raw_key) if raw_key else None
+    if not email:
+        return jsonify({'ok': False, 'error': 'Invalid or missing API key'}), 401
+
+    if not is_admin(email) and get_user_credits(email) < 1:
+        return jsonify({'ok': False, 'error': 'No credits remaining — purchase at /pricing'}), 402
+
+    if not is_admin(email) and not _api_rate_limit_ok(email):
+        return jsonify({'ok': False, 'error': 'Rate limit exceeded: 60 checks per hour'}), 429
+
+    data      = request.get_json(force=True, silent=True) or {}
+    operation = data.get('operation', '').strip()
+    website   = data.get('website',   '').strip()
+    if not operation or not website:
+        return jsonify({'ok': False, 'error': 'operation and website are required'}), 400
+    if not website.startswith('http'):
+        website = 'https://' + website
+
+    job_id = uuid.uuid4().hex[:16]
+    now    = datetime.now(timezone.utc)
+    with jobs_lock:
+        jobs[job_id] = {
+            'id': job_id, 'operation': operation, 'website': website,
+            'status': 'queued', 'report': None,
+            'submitted_at': now.isoformat(), 'finished_at': None,
+            'unlocked': True, 'user_email': email, 'source': 'api',
+        }
+
+    deduct_user_credit(email)
+    threading.Thread(target=_run_job, args=(job_id, operation, website), daemon=True).start()
+
+    return jsonify({
+        'ok':       True,
+        'job_id':   job_id,
+        'status':   'queued',
+        'poll_url': f'{APP_BASE_URL}/api/v1/check/{job_id}',
+    }), 202
+
+
+@app.route('/api/v1/check/<job_id>')
+def api_v1_check_result(job_id):
+    raw_key = _get_api_key_from_request()
+    email   = verify_api_key(raw_key) if raw_key else None
+    if not email:
+        return jsonify({'ok': False, 'error': 'Invalid or missing API key'}), 401
+
+    with jobs_lock:
+        job = dict(jobs.get(job_id, {}))
+
+    # Fall back to DB if not in memory
+    if not job and DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    q = ("SELECT job_id,user_email,operation,website,status,report,submitted_at,finished_at"
+                         " FROM job_history WHERE job_id=%s" + ("" if is_admin(email) else " AND user_email=%s"))
+                    params = (job_id,) if is_admin(email) else (job_id, email.lower())
+                    cur.execute(q, params)
+                    row = cur.fetchone()
+            if row:
+                job = {'id': row[0], 'user_email': row[1], 'operation': row[2], 'website': row[3],
+                       'status': row[4], 'report': row[5],
+                       'submitted_at': str(row[6]) if row[6] else None,
+                       'finished_at':  str(row[7]) if row[7] else None}
+        except Exception:
+            pass
+
+    if not job:
+        return jsonify({'ok': False, 'error': 'Job not found'}), 404
+    if not is_admin(email) and job.get('user_email', '').lower() != email.lower():
+        return jsonify({'ok': False, 'error': 'Job not found'}), 404
+
+    out = {
+        'ok':           True,
+        'job_id':       job_id,
+        'status':       job.get('status'),
+        'operation':    job.get('operation'),
+        'website':      job.get('website'),
+        'submitted_at': job.get('submitted_at'),
+        'finished_at':  job.get('finished_at'),
+    }
+    if job.get('status') == 'done':
+        rpt = job.get('report') or {}
+        out['report'] = {
+            'flags':         len(rpt.get('flagged',   [])),
+            'cautions':      len(rpt.get('caution',   [])),
+            'flagged':       rpt.get('flagged',   []),
+            'caution':       rpt.get('caution',   []),
+            'verified':      rpt.get('verified',  []),
+            'marketing':     rpt.get('marketing', []),
+            'cert':          rpt.get('cert',      {}),
+            'cert_products': rpt.get('cert_products', []),
+            'summary':       rpt.get('summary',   ''),
+        }
+    elif job.get('status') == 'error':
+        rpt = job.get('report') or {}
+        out['error'] = rpt.get('error', 'Check failed')
+
+    return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
+# API documentation page
+# ---------------------------------------------------------------------------
+
+API_DOCS_HTML = """
+<div class="page-title">API Documentation</div>
+<div class="page-subtitle">Integrate organic compliance checks into your own systems using the OWC REST API.</div>
+
+<div class="card">
+  <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Authentication</div>
+  <p style="font-size:.88rem;color:var(--text);margin-bottom:10px">All API requests require your API key, passed as a Bearer token:</p>
+  <pre style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:.8rem;overflow-x:auto">Authorization: Bearer owc_live_YOUR_KEY</pre>
+  <p style="font-size:.82rem;color:var(--muted);margin-top:10px">Generate a key in your <a href="/account" style="color:var(--primary)">Account</a> settings. Keys never expire — revoke them there if compromised.</p>
+</div>
+
+<div class="card">
+  <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Endpoints</div>
+
+  <div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:18px">
+    <div style="background:var(--lavender);padding:12px 16px;border-bottom:1px solid var(--border)">
+      <code style="font-size:.82rem;font-weight:700;color:var(--primary-dark)">GET /api/v1/status</code>
+      <span style="font-size:.75rem;color:var(--muted);margin-left:10px">Validate key &amp; check credits</span>
+    </div>
+    <div style="padding:14px 16px">
+      <pre style="font-size:.77rem;background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto">curl -H "Authorization: Bearer owc_live_YOUR_KEY" \\
+     https://www.organicwebchecker.com/api/v1/status
+
+{
+  "ok": true,
+  "email": "you@example.com",
+  "credits": 10,
+  "rate_limit": "60 checks per rolling hour"
+}</pre>
+    </div>
+  </div>
+
+  <div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:18px">
+    <div style="background:var(--lavender);padding:12px 16px;border-bottom:1px solid var(--border)">
+      <code style="font-size:.82rem;font-weight:700;color:var(--primary-dark)">POST /api/v1/check</code>
+      <span style="font-size:.75rem;color:var(--muted);margin-left:10px">Submit a compliance check</span>
+    </div>
+    <div style="padding:14px 16px">
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Returns immediately with a <code>job_id</code>. Poll the result endpoint until <code>status</code> is <code>done</code>. Costs 1 credit per call.</p>
+      <pre style="font-size:.77rem;background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto">curl -X POST \\
+     -H "Authorization: Bearer owc_live_YOUR_KEY" \\
+     -H "Content-Type: application/json" \\
+     -d '{"operation": "Green Hills Farm", "website": "https://example.com"}' \\
+     https://www.organicwebchecker.com/api/v1/check
+
+{
+  "ok": true,
+  "job_id": "a1b2c3d4e5f6...",
+  "status": "queued",
+  "poll_url": "https://www.organicwebchecker.com/api/v1/check/a1b2c3d4e5f6..."
+}</pre>
+    </div>
+  </div>
+
+  <div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:18px">
+    <div style="background:var(--lavender);padding:12px 16px;border-bottom:1px solid var(--border)">
+      <code style="font-size:.82rem;font-weight:700;color:var(--primary-dark)">GET /api/v1/check/{job_id}</code>
+      <span style="font-size:.75rem;color:var(--muted);margin-left:10px">Poll for results</span>
+    </div>
+    <div style="padding:14px 16px">
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Poll every 3&ndash;5 seconds. <code>status</code> progresses: <code>queued</code> → <code>running</code> → <code>done</code> or <code>error</code>.</p>
+      <pre style="font-size:.77rem;background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto">curl -H "Authorization: Bearer owc_live_YOUR_KEY" \\
+     https://www.organicwebchecker.com/api/v1/check/a1b2c3d4e5f6...
+
+{
+  "ok": true,
+  "job_id": "a1b2c3d4e5f6...",
+  "status": "done",
+  "operation": "Green Hills Farm",
+  "website": "https://example.com",
+  "report": {
+    "flags": 2,
+    "cautions": 1,
+    "flagged":  [{ "title": "...", "detail": "..." }],
+    "caution":  [{ "title": "...", "detail": "..." }],
+    "verified": [...],
+    "cert":     { "operation": "...", "certifier": "...", "status": "..." },
+    "cert_products": ["Organic Apples", "Organic Pears"]
+  }
+}</pre>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Rate Limits &amp; Credits</div>
+  <ul style="font-size:.86rem;color:var(--text);line-height:1.8;padding-left:18px">
+    <li>60 checks per rolling hour per API key</li>
+    <li>Each successful check costs 1 credit</li>
+    <li>Credits are deducted at submission, not completion</li>
+    <li>Failed checks (OID not found, network error) still consume a credit</li>
+  </ul>
+  <p style="font-size:.82rem;color:var(--muted);margin-top:12px">Need higher limits? <a href="mailto:hello@organicwebchecker.com" style="color:var(--primary)">Contact us</a> for enterprise pricing.</p>
+</div>
+
+<div class="card">
+  <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Python Example</div>
+  <pre style="font-size:.77rem;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto">import requests, time
+
+API_KEY = "owc_live_YOUR_KEY"
+BASE    = "https://www.organicwebchecker.com"
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
+# Submit
+r = requests.post(f"{BASE}/api/v1/check",
+    headers=HEADERS,
+    json={"operation": "Green Hills Farm", "website": "https://example.com"})
+job_id = r.json()["job_id"]
+
+# Poll
+while True:
+    r = requests.get(f"{BASE}/api/v1/check/{job_id}", headers=HEADERS)
+    data = r.json()
+    if data["status"] == "done":
+        print(f'{data[\"report\"][\"flags\"]} flags, {data[\"report\"][\"cautions\"]} cautions')
+        break
+    elif data["status"] == "error":
+        print("Error:", data.get("error"))
+        break
+    time.sleep(4)</pre>
+</div>
+"""
+
+
+@app.route('/api')
+def api_docs():
+    return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
+                                  page_title='API Documentation', active='', body=API_DOCS_HTML)
 
 
 # ---------------------------------------------------------------------------
