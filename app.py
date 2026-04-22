@@ -38,21 +38,12 @@ _db_pub_url = os.environ.get('DATABASE_PUBLIC_URL', '')
 DATABASE_URL = _db_pub_url or _db_url
 APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebchecker.com')
 
-# SMTP — Google Workspace accounts, all via smtp.gmail.com:587
-#   REPORT_SMTP_PASS  — app password for report@organicwebchecker.com (reports)
-#   HELLO_SMTP_PASS   — app password for hello@organicwebchecker.com  (welcome / marketing)
-#   SMTP_PASS         — legacy fallback for password-reset (hello@ or any address)
-#   SMTP_USER         — legacy fallback sender address
-SMTP_HOST        = 'smtp.gmail.com'
-SMTP_PORT        = 587
-REPORT_SMTP_USER = 'report@organicwebchecker.com'
-REPORT_SMTP_PASS = os.environ.get('REPORT_SMTP_PASS', '')
-HELLO_SMTP_USER  = 'hello@organicwebchecker.com'
-HELLO_SMTP_PASS  = os.environ.get('HELLO_SMTP_PASS', '')
-SMTP_USER        = os.environ.get('SMTP_USER',  HELLO_SMTP_USER)
-SMTP_PASS        = os.environ.get('SMTP_PASS',  HELLO_SMTP_PASS)
-FROM_EMAIL       = os.environ.get('FROM_EMAIL', SMTP_USER)
+# Email — Resend HTTP API (Railway blocks outbound SMTP)
 RESEND_API_KEY   = os.environ.get('RESEND_API_KEY', '')
+# Use verified domain sender once organicwebchecker.com is added in Resend dashboard;
+# until then onboarding@resend.dev works for testing.
+REPORT_FROM      = 'Organic Web Checker <onboarding@resend.dev>'
+HELLO_FROM       = 'Organic Web Checker <onboarding@resend.dev>'
 
 # ---------------------------------------------------------------------------
 # Postgres helpers
@@ -449,31 +440,43 @@ def get_next_available_slot() -> datetime | None:
     return None
 
 
-def _smtp_send(smtp_user: str, smtp_pass: str, to_email: str, subject: str, html_body: str):
-    """Send an email via Gmail SMTP. Returns True on success, None if no password, error str on failure."""
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    if not smtp_pass:
-        print(f'[EMAIL] No app password set for {smtp_user} — skipping send to {to_email}')
-        return None
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = f'Organic Web Checker <{smtp_user}>'
-    msg['To']      = to_email
-    msg.attach(MIMEText(html_body, 'html'))
+def _resend_send(to_email: str, subject: str, html_body: str, from_addr: str = None,
+                 attachments: list = None):
+    """Send email via Resend HTTP API. Returns True on success, error string on failure."""
+    import requests as _req
+    if not RESEND_API_KEY:
+        print('[EMAIL] RESEND_API_KEY not set')
+        return 'RESEND_API_KEY not configured'
+    payload = {
+        'from':    from_addr or REPORT_FROM,
+        'to':      [to_email],
+        'subject': subject,
+        'html':    html_body,
+    }
+    if attachments:
+        payload['attachments'] = attachments
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.ehlo()
-            s.starttls()
-            s.login(smtp_user, smtp_pass)
-            s.sendmail(smtp_user, to_email, msg.as_string())
-        print(f'[EMAIL] Sent from {smtp_user} to {to_email}: {subject}')
-        return True
+        resp = _req.post(
+            'https://api.resend.com/emails',
+            headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+            json=payload,
+            timeout=15,
+        )
+        if resp.status_code in (200, 201):
+            print(f'[EMAIL] Sent via Resend to {to_email}: {subject}')
+            return True
+        err = resp.text[:200]
+        print(f'[EMAIL] Resend error {resp.status_code}: {err}')
+        return err
     except Exception as exc:
         err = str(exc)
-        print(f'[EMAIL] SMTP error ({smtp_user} → {to_email}): {err}')
+        print(f'[EMAIL] Resend exception: {err}')
         return err
+
+
+# Keep _smtp_send as an alias so nothing else breaks — now routes through Resend
+def _smtp_send(smtp_user, smtp_pass, to_email, subject, html_body):
+    return _resend_send(to_email, subject, html_body)
 
 
 def _build_report_html(operation: str, report: dict, report_url: str) -> tuple[str, str]:
@@ -526,44 +529,22 @@ def _send_report_email(user_email: str, operation: str, check_id: str, report: d
 
 
 def _send_report_email_md(user_email: str, operation: str, check_id: str, report: dict) -> bool:
-    """Send report as a .md file attachment."""
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from email.mime.base import MIMEBase
-    from email import encoders
-    if not REPORT_SMTP_PASS:
-        return False
-    md_text  = report_to_markdown(report)
-    flags    = len(report.get('flagged', []))
-    caution  = len(report.get('caution', []))
-    subject  = f'Organic Web Checker — {operation} ({flags} flags, {caution} cautions)'
-    filename = f'owc-report-{check_id}.md'
+    """Send report as a .md file attachment via Resend."""
+    import base64
+    md_text    = report_to_markdown(report)
+    flags      = len(report.get('flagged', []))
+    caution    = len(report.get('caution', []))
+    subject    = f'Organic Web Checker — {operation} ({flags} flags, {caution} cautions)'
+    filename   = f'owc-report-{check_id}.md'
     report_url = f'{APP_BASE_URL}/scheduled-report/{check_id}'
-    body_html = f'<p>Your scheduled check for <strong>{operation}</strong> is complete.</p>' \
-                f'<p>{flags} flag(s) · {caution} caution(s)</p>' \
-                f'<p><a href="{report_url}">View full report online</a></p>' \
-                f'<p>Markdown report attached.</p>'
-    msg = MIMEMultipart()
-    msg['Subject'] = subject
-    msg['From']    = f'Organic Web Checker <{REPORT_SMTP_USER}>'
-    msg['To']      = user_email
-    msg.attach(MIMEText(body_html, 'html'))
-    part = MIMEBase('application', 'octet-stream')
-    part.set_payload(md_text.encode('utf-8'))
-    encoders.encode_base64(part)
-    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-    msg.attach(part)
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.ehlo(); s.starttls()
-            s.login(REPORT_SMTP_USER, REPORT_SMTP_PASS)
-            s.sendmail(REPORT_SMTP_USER, user_email, msg.as_string())
-        print(f'[EMAIL] MD report sent to {user_email}: {subject}')
-        return True
-    except Exception as exc:
-        print(f'[EMAIL] MD send error: {exc}')
-        return False
+    body_html  = (f'<p>Your scheduled check for <strong>{operation}</strong> is complete.</p>'
+                  f'<p>{flags} flag(s) &middot; {caution} caution(s)</p>'
+                  f'<p><a href="{report_url}">View full report online</a></p>'
+                  f'<p>Markdown report attached as <code>{filename}</code>.</p>')
+    attachments = [{'filename': filename,
+                    'content': base64.b64encode(md_text.encode()).decode()}]
+    r = _resend_send(user_email, subject, body_html, attachments=attachments)
+    return r is True
 
 
 def _send_welcome_email(to_email: str) -> bool:
@@ -592,7 +573,7 @@ def _send_welcome_email(to_email: str) -> bool:
   </div>
 </div>
 </body></html>"""
-    return _smtp_send(HELLO_SMTP_USER, HELLO_SMTP_PASS, to_email, 'Welcome to Organic Web Checker', html_body)
+    return _resend_send(to_email, 'Welcome to Organic Web Checker', html_body, from_addr=HELLO_FROM) is True
 
 
 @app.context_processor
@@ -4980,12 +4961,11 @@ def admin_certifier_status(req_id):
 def admin_test_email():
     if get_logged_in_email() != ADMIN_EMAIL:
         return 'Unauthorized', 403
-    lines = ['<h2>SMTP Test</h2><pre>']
-    for user, pw in [(REPORT_SMTP_USER, REPORT_SMTP_PASS), (HELLO_SMTP_USER, HELLO_SMTP_PASS)]:
-        r = _smtp_send(user, pw, ADMIN_EMAIL, 'OWC SMTP Test', f'<p>Test from {user}</p>')
-        status = 'OK ✓' if r is True else (f'FAIL: {r}' if isinstance(r, str) else 'SKIP: no password')
-        lines.append(f'{user}  →  {status}')
-    lines.append('</pre><p>Check healersfind@gmail.com for test messages.</p>')
+    r = _resend_send(ADMIN_EMAIL, 'OWC Email Test', '<p>Resend is working ✓</p>')
+    status = 'OK ✓' if r is True else f'FAIL: {r}'
+    lines = [f'<h2>Resend Test</h2><pre>→ {ADMIN_EMAIL}  {status}</pre>'
+             f'<p>Key configured: {"Yes" if RESEND_API_KEY else "No"}</p>'
+             f'<p>Check healersfind@gmail.com for test message.</p>']
     return '\n'.join(lines)
 
 
