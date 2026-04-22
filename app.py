@@ -5675,6 +5675,12 @@ def schedule_page_html(user_email: str) -> str:
         except Exception:
             pass
 
+    # Pre-compute next available slot server-side so the page shows it instantly
+    next_slot = get_next_available_slot()
+    next_avail_iso_js = json.dumps(
+        next_slot.strftime('%Y-%m-%dT%H:%M:00Z') if next_slot else None
+    )
+
     if not user_email:
         return """
         <div class="page-title">Schedule a Check</div>
@@ -5803,7 +5809,7 @@ def schedule_page_html(user_email: str) -> str:
     var _userTz      = {saved_tz_js};
     var _selectedSlot = null;
     var _calYear, _calMonth;
-    var _nextAvailIso = null;
+    var _nextAvailIso = {next_avail_iso_js};
     var _selectedCalDay = null;
 
     function onTzChange(tz) {{
@@ -6025,10 +6031,14 @@ def schedule_page_html(user_email: str) -> str:
       renderCalendar(_calYear, _calMonth);
       var cell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === localDs; }});
       selectCalDay(localDs, cell || null);
+      // After slots load, auto-select the specific slot and show booking card
       setTimeout(function() {{
-        _selectedSlot = _nextAvailIso;
-        if (_selectedCalDay) loadSlots(_selectedCalDay);
-      }}, 300);
+        var btn = document.querySelector('.slot-btn[data-iso="' + _nextAvailIso + '"]');
+        if (btn && !btn.disabled) {{
+          btn.scrollIntoView({{behavior:'smooth', block:'center'}});
+          selectSlot(_nextAvailIso);
+        }}
+      }}, 800);
     }}
 
     // ── Booking ───────────────────────────────────────────────────────────
@@ -6106,6 +6116,21 @@ def schedule_page_html(user_email: str) -> str:
 
     // ── Init ──────────────────────────────────────────────────────────────
     calInit();
+    // Show next available immediately from server-injected value
+    if (_nextAvailIso) {{
+      document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
+    }} else {{
+      document.getElementById('nextAvailTime').textContent = 'No slots available';
+    }}
+    // Auto-load today's slots so the grid is visible on arrival
+    var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
+    var todayCell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === todayLocalDs; }});
+    if (todayCell) {{
+      selectCalDay(todayLocalDs, todayCell);
+    }} else if (_nextAvailIso) {{
+      // Today has no available slots — jump to next available day instead
+      clickNextAvail();
+    }}
     pollNextAvail();
     setInterval(pollNextAvail, 5000);
     loadMyChecks();
