@@ -5330,6 +5330,29 @@ def schedule_page_html(user_email: str) -> str:
           <a href="/pricing" class="btn-primary" style="text-decoration:none;display:inline-block">View Pricing</a>
         </div>"""
 
+    ALL_TZ = [
+        'UTC',
+        'America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
+        'America/Anchorage','Pacific/Honolulu','America/Toronto','America/Vancouver',
+        'America/Phoenix','America/Sao_Paulo','America/Argentina/Buenos_Aires',
+        'America/Mexico_City','America/Bogota','America/Lima','America/Santiago',
+        'Europe/London','Europe/Paris','Europe/Berlin','Europe/Madrid','Europe/Rome',
+        'Europe/Amsterdam','Europe/Zurich','Europe/Warsaw','Europe/Prague',
+        'Europe/Athens','Europe/Helsinki','Europe/Stockholm','Europe/Oslo',
+        'Europe/Lisbon','Europe/Dublin','Europe/Bucharest','Europe/Istanbul',
+        'Europe/Moscow','Europe/Kiev','Europe/Minsk',
+        'Asia/Dubai','Asia/Kolkata','Asia/Dhaka','Asia/Karachi',
+        'Asia/Bangkok','Asia/Jakarta','Asia/Singapore','Asia/Shanghai',
+        'Asia/Hong_Kong','Asia/Seoul','Asia/Tokyo',
+        'Australia/Sydney','Australia/Melbourne','Australia/Brisbane',
+        'Australia/Adelaide','Australia/Perth','Pacific/Auckland',
+        'Pacific/Fiji','Pacific/Guam','Africa/Cairo','Africa/Nairobi',
+        'Africa/Lagos','Africa/Johannesburg',
+    ]
+    tz_opts = ''.join(
+        '<option value="' + tz + '"' + (' selected' if tz == saved_tz else '') + '>' + tz.replace('_', ' ') + '</option>'
+        for tz in ALL_TZ
+    )
     saved_tz_js = json.dumps(saved_tz)
     return f"""
     <div class="page-title">Schedule a Check</div>
@@ -5339,7 +5362,8 @@ def schedule_page_html(user_email: str) -> str:
     <div class="card" style="padding:14px 20px">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <span style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap">Your Timezone</span>
-        <select id="tzSelect" onchange="onTzChange(this.value)" style="flex:1;min-width:200px;padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)"></select>
+        <select id="tzSelect" onchange="onTzChange(this.value)" style="flex:1;min-width:200px;padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)">{tz_opts}</select>
+        <span id="tzSaveStatus" style="font-size:.75rem;color:var(--muted)"></span>
       </div>
     </div>
 
@@ -5415,50 +5439,17 @@ def schedule_page_html(user_email: str) -> str:
     var _nextAvailIso = null;
     var _selectedCalDay = null;
 
-    // ── Timezone ──────────────────────────────────────────────────────────
-    var TZ_LIST = [
-      'UTC',
-      'America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
-      'America/Anchorage','Pacific/Honolulu','America/Toronto','America/Vancouver',
-      'America/Phoenix','America/Sao_Paulo','America/Argentina/Buenos_Aires',
-      'America/Mexico_City','America/Bogota','America/Lima','America/Santiago',
-      'Europe/London','Europe/Paris','Europe/Berlin','Europe/Madrid','Europe/Rome',
-      'Europe/Amsterdam','Europe/Zurich','Europe/Warsaw','Europe/Prague',
-      'Europe/Athens','Europe/Helsinki','Europe/Stockholm','Europe/Oslo',
-      'Europe/Lisbon','Europe/Dublin','Europe/Bucharest','Europe/Istanbul',
-      'Europe/Moscow','Europe/Kiev','Europe/Minsk',
-      'Asia/Dubai','Asia/Kolkata','Asia/Dhaka','Asia/Karachi',
-      'Asia/Bangkok','Asia/Jakarta','Asia/Singapore','Asia/Shanghai',
-      'Asia/Hong_Kong','Asia/Seoul','Asia/Tokyo',
-      'Australia/Sydney','Australia/Melbourne','Australia/Brisbane',
-      'Australia/Adelaide','Australia/Perth','Pacific/Auckland',
-      'Pacific/Fiji','Pacific/Guam','Africa/Cairo','Africa/Nairobi',
-      'Africa/Lagos','Africa/Johannesburg'
-    ];
-
-    function buildTzSelect() {{
-      var sel = document.getElementById('tzSelect');
-      var detected = '';
-      try {{ detected = Intl.DateTimeFormat().resolvedOptions().timeZone; }} catch(e) {{}}
-      var chosen = (_userTz && _userTz !== 'UTC') ? _userTz : (detected || 'UTC');
-      if (detected && TZ_LIST.indexOf(detected) === -1) {{
-        var opt = document.createElement('option');
-        opt.value = detected; opt.textContent = detected.replace(/_/g,' ');
-        sel.appendChild(opt);
-      }}
-      TZ_LIST.forEach(function(tz) {{
-        var opt = document.createElement('option');
-        opt.value = tz; opt.textContent = tz.replace(/_/g,' ');
-        sel.appendChild(opt);
-      }});
-      sel.value = chosen;
-      if (!sel.value) sel.value = 'UTC';
-      _userTz = sel.value;
-    }}
-
     function onTzChange(tz) {{
       _userTz = tz;
-      fetch('/api/user/timezone', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{timezone:tz}})}});
+      var statusEl = document.getElementById('tzSaveStatus');
+      if (statusEl) statusEl.textContent = 'Saving...';
+      fetch('/api/user/timezone', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{timezone:tz}})}})
+        .then(function(r){{ return r.json(); }})
+        .then(function(d){{
+          if (statusEl) statusEl.textContent = d.ok ? 'Saved \u2713' : 'Save failed';
+          setTimeout(function(){{ if (statusEl) statusEl.textContent = ''; }}, 2500);
+        }})
+        .catch(function(){{ if (statusEl) {{ statusEl.textContent = 'Save failed'; }} }});
       if (_nextAvailIso) document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
       renderCalendar(_calYear, _calMonth);
       if (_selectedCalDay) loadSlots(_selectedCalDay);
@@ -5747,7 +5738,6 @@ def schedule_page_html(user_email: str) -> str:
     }}
 
     // ── Init ──────────────────────────────────────────────────────────────
-    buildTzSelect();
     calInit();
     pollNextAvail();
     setInterval(pollNextAvail, 5000);
