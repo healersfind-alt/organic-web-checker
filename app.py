@@ -41,9 +41,8 @@ APP_BASE_URL           = os.environ.get('APP_BASE_URL', 'https://www.organicwebc
 # Email — Resend HTTP API (Railway blocks outbound SMTP)
 RESEND_API_KEY   = os.environ.get('RESEND_API_KEY', '')
 # Use verified domain sender once organicwebchecker.com is added in Resend dashboard;
-# until then onboarding@resend.dev works for testing.
-REPORT_FROM      = 'Organic Web Checker <onboarding@resend.dev>'
-HELLO_FROM       = 'Organic Web Checker <onboarding@resend.dev>'
+REPORT_FROM      = 'Organic Web Checker <report@organicwebchecker.com>'
+HELLO_FROM       = 'Organic Web Checker <hello@organicwebchecker.com>'
 
 # ---------------------------------------------------------------------------
 # Postgres helpers
