@@ -175,6 +175,8 @@ def init_db():
                 ALTER TABLE scheduled_checks ADD COLUMN IF NOT EXISTS report_format TEXT DEFAULT 'html'
             """)
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC'")
+            cur.execute("ALTER TABLE job_history ADD COLUMN IF NOT EXISTS unlocked BOOLEAN DEFAULT FALSE")
+            cur.execute("ALTER TABLE job_history ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMPTZ")
         conn.commit()
 
 try:
@@ -396,6 +398,22 @@ def deduct_user_credit(email):
             conn.commit()
     except Exception:
         pass
+
+
+def _mark_job_unlocked(job_id: str):
+    """Persist unlocked=True to DB so the gate survives app restarts."""
+    if not DATABASE_URL:
+        return
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE job_history SET unlocked = TRUE WHERE job_id = %s",
+                    (job_id,)
+                )
+            conn.commit()
+    except Exception as exc:
+        print(f'[DB] _mark_job_unlocked({job_id}): {exc}')
 
 
 # ---------------------------------------------------------------------------
@@ -3848,6 +3866,29 @@ def job_status(job_id):
 def job_result(job_id):
     with jobs_lock:
         job = dict(jobs.get(job_id, {}))
+
+    # ── Fall back to DB when job not in memory (after redeploy) ─────────────
+    db_unlocked   = False
+    db_owner_email = ''
+    if not job and DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT report, unlocked, user_email FROM job_history WHERE job_id = %s",
+                        (job_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        job = {
+                            'id': job_id, 'status': 'done',
+                            'report': row[0],
+                        }
+                        db_unlocked    = bool(row[1])
+                        db_owner_email = row[2] or ''
+        except Exception:
+            pass
+
     if not job:
         return 'Not found', 404
     if job['status'] not in ('done', 'error'):
@@ -3858,7 +3899,13 @@ def job_result(job_id):
 
     # ── Gate check ──────────────────────────────────────────────────────────
     email = get_logged_in_email()
-    already_unlocked = job.get('unlocked', False)
+
+    # Ownership check (Fix 2): non-admin users can only view their own jobs
+    job_owner = job.get('user_email') or db_owner_email
+    if job_owner and not is_admin(email) and email != job_owner:
+        return render_template_string(GATE_PARTIAL, report=report, job_id=job_id)
+
+    already_unlocked = job.get('unlocked', False) or db_unlocked
 
     if already_unlocked or is_admin(email):
         return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
@@ -3868,6 +3915,7 @@ def job_result(job_id):
         with jobs_lock:
             if job_id in jobs:
                 jobs[job_id]['unlocked'] = True
+        _mark_job_unlocked(job_id)
         return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
 
     # Check session-token credits (anonymous purchasers)
@@ -3891,6 +3939,7 @@ def job_result(job_id):
                 with jobs_lock:
                     if job_id in jobs:
                         jobs[job_id]['unlocked'] = True
+                _mark_job_unlocked(job_id)
                 return render_template_string(REPORT_PARTIAL, report=report, job_id=job_id)
         except Exception:
             pass
@@ -4912,6 +4961,25 @@ def email_report(job_id):
             pass
     if not report or 'error' in report:
         return jsonify({'ok': False, 'error': 'Report not ready'}), 400
+
+    # ── Rate limit: 1 send per job per hour ──────────────────────────────────
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT last_emailed_at FROM job_history WHERE job_id = %s",
+                        (job_id,)
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        age = datetime.now(timezone.utc) - row[0]
+                        if age.total_seconds() < 3600:
+                            mins_left = int((3600 - age.total_seconds()) / 60) + 1
+                            return jsonify({'ok': False, 'error': f'Already sent — try again in {mins_left} min'}), 429
+        except Exception:
+            pass
+
     operation  = report.get('operation', 'Unknown Operation')
     report_url = f'{APP_BASE_URL}/job/{job_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
@@ -4919,6 +4987,20 @@ def email_report(job_id):
     if result is not True:
         detail = result if isinstance(result, str) else 'Send failed'
         return jsonify({'ok': False, 'error': detail}), 500
+
+    # Stamp the send time
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE job_history SET last_emailed_at = NOW() WHERE job_id = %s",
+                        (job_id,)
+                    )
+                conn.commit()
+        except Exception:
+            pass
+
     return jsonify({'ok': True})
 
 
