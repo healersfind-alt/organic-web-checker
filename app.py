@@ -174,6 +174,7 @@ def init_db():
             cur.execute("""
                 ALTER TABLE scheduled_checks ADD COLUMN IF NOT EXISTS report_format TEXT DEFAULT 'html'
             """)
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC'")
         conn.commit()
 
 try:
@@ -409,12 +410,28 @@ def get_booked_slots_for_day(date_str: str) -> list:
         return []
 
 
+SLOT_START_HOUR = 8   # 8am UTC — first slot of day
+SLOT_END_HOUR   = 21  # 9pm UTC — exclusive (last slot: 20:50)
+
+def _advance_to_op_hours(dt: datetime) -> datetime:
+    """Snap dt to the next valid 10-min slot within 8am–9pm UTC operating hours."""
+    dt = _snap_to_slot(dt)
+    while True:
+        if dt.hour < SLOT_START_HOUR:
+            dt = dt.replace(hour=SLOT_START_HOUR, minute=0, second=0, microsecond=0)
+        elif dt.hour >= SLOT_END_HOUR:
+            dt = (dt + timedelta(days=1)).replace(hour=SLOT_START_HOUR, minute=0, second=0, microsecond=0)
+        else:
+            break
+    return dt
+
+
 def get_next_available_slot() -> datetime | None:
-    """Return the next available 10-min slot starting >= now + 5 minutes."""
-    now   = datetime.now(timezone.utc)
-    start = _snap_to_slot(now + timedelta(minutes=5))
-    end   = now + timedelta(days=7)
-    booked = set()
+    """Return the next available 10-min slot in 8am–9pm UTC, starting >= now + 5 minutes."""
+    now       = datetime.now(timezone.utc)
+    candidate = _advance_to_op_hours(now + timedelta(minutes=5))
+    end       = now + timedelta(days=30)
+    booked    = set()
     if DATABASE_URL:
         try:
             with db_conn() as conn:
@@ -423,7 +440,7 @@ def get_next_available_slot() -> datetime | None:
                         """SELECT scheduled_at FROM scheduled_checks
                            WHERE scheduled_at BETWEEN %s AND %s
                            AND status NOT IN ('cancelled')""",
-                        (start, end)
+                        (candidate, end)
                     )
                     rows = cur.fetchall()
             booked = {
@@ -432,11 +449,10 @@ def get_next_available_slot() -> datetime | None:
             }
         except Exception as e:
             print(f'[SCHED] get_next_available error: {e}')
-    candidate = start
     while candidate <= end:
         if candidate not in booked:
             return candidate
-        candidate += timedelta(minutes=10)
+        candidate = _advance_to_op_hours(candidate + timedelta(minutes=10))
     return None
 
 
@@ -522,10 +538,10 @@ def _build_report_html(operation: str, report: dict, report_url: str) -> tuple[s
 
 
 def _send_report_email(user_email: str, operation: str, check_id: str, report: dict) -> bool:
-    """Send a completed-check report email from report@organicwebchecker.com."""
+    """Send a completed-check report email."""
     report_url = f'{APP_BASE_URL}/scheduled-report/{check_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
-    return _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, user_email, subject, html_body)
+    return _resend_send(user_email, subject, html_body) is True
 
 
 def _send_report_email_md(user_email: str, operation: str, check_id: str, report: dict) -> bool:
@@ -990,8 +1006,8 @@ GLOBAL_CSS = """
     overflow: hidden;
   }
   .header-logo-icon { width: 144px; height: 144px; flex-shrink: 0; border-radius: 14px; }
-  .header-wordmark  { font-size: 1rem; font-weight: 800; }
-  header h1 { font-size: 1rem; font-weight: 800; }
+  .header-wordmark  { font-size: 1.75rem; font-weight: 800; }
+  header h1 { font-size: 1.75rem; font-weight: 800; }
   /* Two-color wordmark — "Organic" accent lavender, "Web Checker" white */
   .wm-organic { color: #A99DFF; }
   .wm-checker { color: #ffffff; }
@@ -1683,51 +1699,64 @@ GLOBAL_CSS = """
   .calc-sub  { font-size: .72rem; color: var(--muted); margin-top: 2px; }
 
   /* ── Scheduling ──────────────────────────────────────────────────────── */
-  .day-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 14px; }
-  .day-tab {
-    padding: 6px 12px; font-size: .78rem; font-weight: 600;
-    border-radius: 10px; border: 1.5px solid var(--border);
-    cursor: pointer; background: none; color: var(--muted); transition: all .12s;
-  }
-  .day-tab:hover  { border-color: var(--primary); color: var(--primary); }
-  .day-tab.active { background: var(--lavender); border-color: var(--primary); color: var(--primary); }
   .next-avail-box {
-    background: linear-gradient(135deg,#E8F5E9,#C8E6C9);
-    border: 1.5px solid #A5D6A7; border-radius: 14px;
-    padding: 14px 18px; margin-bottom: 14px;
+    background: linear-gradient(135deg,var(--lavender),#DDD6FF);
+    border: 1.5px solid rgba(111,94,247,.3); border-radius: 14px;
+    padding: 14px 18px; margin-bottom: 16px;
     display: flex; align-items: center; justify-content: space-between; gap: 14px;
     cursor: pointer; transition: all .15s;
   }
-  .next-avail-box:hover { background: linear-gradient(135deg,#C8E6C9,#A5D6A7); }
-  .next-avail-label { font-size: .75rem; font-weight: 700; color: #2E6B35; text-transform: uppercase; letter-spacing: .06em; }
-  .next-avail-time  { font-size: 1rem; font-weight: 800; color: #2E6B35; margin-top: 2px; }
-  .next-avail-arrow { font-size: 1.2rem; color: #2E7D32; flex-shrink: 0; }
-  .slot-wrap { max-height: 300px; overflow-y: auto; padding-right: 4px; margin-bottom: 4px; }
+  .next-avail-box:hover { background: linear-gradient(135deg,#DDD6FF,#C9BEFF); border-color: var(--primary); }
+  .next-avail-label { font-size: .75rem; font-weight: 700; color: var(--primary-dark); text-transform: uppercase; letter-spacing: .06em; }
+  .next-avail-time  { font-size: 1rem; font-weight: 800; color: var(--text); margin-top: 2px; }
+  .next-avail-arrow { font-size: 1.2rem; color: var(--primary); flex-shrink: 0; }
+  /* ── Calendar ─────────────────────────────────────────────────────────── */
+  .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .cal-month-label { font-size: 1rem; font-weight: 800; color: var(--text); }
+  .cal-nav-btn {
+    width: 32px; height: 32px; border-radius: 8px; border: 1.5px solid var(--border);
+    background: none; color: var(--muted); cursor: pointer; font-size: .9rem;
+    display: flex; align-items: center; justify-content: center; transition: all .12s;
+  }
+  .cal-nav-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: var(--lavender); }
+  .cal-nav-btn:disabled { opacity: .3; cursor: default; }
+  .cal-weekdays {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 2px; margin-bottom: 4px;
+  }
+  .cal-weekdays div { text-align: center; font-size: .68rem; font-weight: 700; color: var(--muted); padding: 4px 0; text-transform: uppercase; letter-spacing: .05em; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-day {
+    aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    border-radius: 10px; font-size: .85rem; font-weight: 600;
+    border: 1.5px solid transparent; transition: all .12s;
+  }
+  .cal-blank { border: none; }
+  .cal-day-past { color: var(--dim); cursor: default; }
+  .cal-day-avail {
+    cursor: pointer; color: var(--text); border-color: var(--border);
+    background: white;
+  }
+  .cal-day-avail:hover { background: var(--lavender); border-color: var(--primary); color: var(--primary); }
+  .cal-day-selected { background: var(--primary) !important; border-color: var(--primary-dark) !important; color: white !important; }
+  /* ── Slot grid ────────────────────────────────────────────────────────── */
+  .slot-wrap { max-height: 340px; overflow-y: auto; padding-right: 4px; margin-bottom: 4px; }
   .slot-wrap::-webkit-scrollbar { width: 4px; }
   .slot-wrap::-webkit-scrollbar-track { background: var(--bg); }
-  .slot-wrap::-webkit-scrollbar-thumb { background: #A5D6A7; border-radius: 2px; }
-  .hour-row { margin-bottom: 4px; }
-  .hour-label {
-    font-size: .63rem; font-weight: 700; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .07em;
-    padding: 6px 0 3px; border-top: 1px solid var(--border); margin-top: 2px;
-  }
-  .hour-slots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+  .slot-wrap::-webkit-scrollbar-thumb { background: rgba(111,94,247,.3); border-radius: 2px; }
+  #slotGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(106px, 1fr)); gap: 5px; padding: 2px; }
   .slot-btn {
-    padding: 5px 3px; font-size: .7rem; font-weight: 600;
-    border-radius: 7px; border: 1px solid; cursor: pointer;
+    padding: 7px 4px; font-size: .73rem; font-weight: 600;
+    border-radius: 8px; border: 1px solid; cursor: pointer;
     text-align: center; transition: all .12s; background: none; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
   }
-  .slot-btn.avail    { background: #E8F5E9; border-color: #A5D6A7; color: #2E7D32; }
-  .slot-btn.avail:hover { background: #C8E6C9; border-color: #81C784; }
-  .slot-btn.booked   { background: #F9FAFB; border-color: var(--border); color: var(--dim); cursor: not-allowed; }
-  .slot-btn.past     { background: #F9FAFB; border-color: var(--border); color: var(--dim); cursor: not-allowed; opacity: .5; }
-  .slot-btn.selected { background: var(--lavender); border-color: var(--primary-dark); color: var(--primary-dark); font-weight: 800; }
-  .selected-slot-display {
-    background: var(--lavender); border: 1.5px solid rgba(111,94,247,.3);
-    border-radius: 14px; padding: 12px 16px; margin-bottom: 14px;
-    font-size: .9rem; font-weight: 700; color: var(--primary); display: none;
-  }
+  .slot-btn.avail    { background: var(--lavender); border-color: rgba(111,94,247,.3); color: var(--primary-dark); }
+  .slot-btn.avail:hover { background: #DDD6FF; border-color: var(--primary); }
+  .slot-btn.booked   { background: var(--bg); border-color: var(--border); color: var(--dim); cursor: not-allowed; font-size: .66rem; }
+  .slot-btn.past     { background: var(--bg); border-color: var(--border); color: var(--dim); cursor: not-allowed; opacity: .45; }
+  .slot-btn.selected { background: var(--primary); border-color: var(--primary-dark); color: white; font-weight: 800; }
+  /* ── Scheduled checks list ────────────────────────────────────────────── */
   .sched-list-item {
     display: flex; align-items: center; gap: 14px;
     padding: 12px 16px; border-radius: 14px;
@@ -1737,7 +1766,7 @@ GLOBAL_CSS = """
   .sched-item-op    { font-size: .88rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sched-item-when  { font-size: .73rem; color: var(--muted); margin-top: 2px; }
   .sched-item-badge { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; border: 1px solid; flex-shrink: 0; }
-  .badge-scheduled  { background: #E8F5E9; border-color: #A5D6A7; color: #2E7D32; }
+  .badge-scheduled  { background: var(--lavender); border-color: rgba(111,94,247,.3); color: var(--primary-dark); }
   .badge-running    { background: #FFF8E1; border-color: #FDE68A; color: #D97706; animation: pulse 1.4s ease-in-out infinite; }
   .badge-done       { background: #E8F5E9; border-color: #A5D6A7; color: #2E7D32; }
   .badge-error      { background: #FEF2F2; border-color: #FECACA; color: var(--red); }
@@ -1797,7 +1826,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
         <button class="nav-signout" onclick="doLogout()">Sign Out</button>
       {% endif %}
     </div>
-    <a href="/#run-check" class="header-cta-btn">Run a Check</a>
+    <a href="/#run-check" class="header-cta-btn">Run Checker</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
         <img src="/static/icon-header.png" class="header-icon" alt="">
@@ -2545,7 +2574,7 @@ MAIN_HTML = """<!DOCTYPE html>
         <button class="nav-signout" onclick="doLogout()">Sign Out</button>
       {% endif %}
     </div>
-    <a href="#run-check" class="header-cta-btn">Run a Check</a>
+    <a href="#run-check" class="header-cta-btn">Run Checker</a>
     <div class="header-icon-wrap">
       <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
         <img src="/static/icon-header.png" class="header-icon" alt="">
@@ -2573,7 +2602,7 @@ MAIN_HTML = """<!DOCTYPE html>
       <h1 class="hero-h1">Organic compliance<br>intelligence for<br><em>modern brands</em></h1>
       <p class="hero-sub">Compare your website&rsquo;s organic product claims against your live USDA certificate. Surface items for review before they become issues.</p>
       <div class="hero-ctas">
-        <a href="#run-check" class="hero-btn-primary">Run a Check</a>
+        <a href="#run-check" class="hero-btn-primary">Run Checker</a>
         <a href="#sample-output" class="hero-btn-secondary">View Sample Results</a>
       </div>
       <div class="hero-trust">
@@ -2876,7 +2905,7 @@ MAIN_HTML = """<!DOCTYPE html>
     </div>
     <div class="footer-col">
       <h4>Product</h4>
-      <a href="#run-check">Run a Check</a>
+      <a href="#run-check">Run Checker</a>
       <a href="/pricing">Pricing</a>
       <a href="/history">History</a>
       <a href="/agents">Agents &amp; API</a>
@@ -3016,7 +3045,7 @@ MAIN_HTML = """<!DOCTYPE html>
         ? '<button class="view-btn" onclick="showJob(\\'' + j.id + '\\')">View</button>' : '';
       const emailBtn = (j.status === 'done')
         ? '<button class="view-btn" style="color:var(--primary);border-color:rgba(111,94,247,.25);margin-left:4px" id="ebtn-' + j.id + '" onclick="emailReport(\\'' + j.id + '\\',this)">&#9993; Email</button>' : '';
-      return '<li class="queue-item"><div><div class="op-name">' + j.operation + '</div><div class="site">' + j.website + '</div></div>' + pill + viewBtn + emailBtn + '</li>';
+      return '<li class="queue-item"><div style="flex:1;min-width:0"><div class="op-name">' + j.operation + '</div><div class="site">' + j.website + '</div></div>' + pill + viewBtn + emailBtn + '</li>';
     }).join('');
   }
 
@@ -4044,6 +4073,47 @@ def api_user():
         'credits': credits,
     })
 
+
+@app.route('/api/user/timezone', methods=['POST'])
+def api_set_timezone():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'ok': False, 'error': 'Not logged in'}), 401
+    tz = ((request.get_json(force=True, silent=True) or {}).get('timezone') or '').strip()
+    if not tz or len(tz) > 80:
+        return jsonify({'ok': False, 'error': 'Invalid timezone'}), 400
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET timezone = %s WHERE email = %s", (tz, email))
+            conn.commit()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    return jsonify({'ok': True})
+
+
+@app.route('/api/queue-depth')
+def api_queue_depth():
+    """Return number of pending scheduled checks in the next hour."""
+    depth = 0
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    now = datetime.now(timezone.utc)
+                    cur.execute(
+                        """SELECT COUNT(*) FROM scheduled_checks
+                           WHERE status IN ('scheduled','running')
+                           AND scheduled_at >= %s AND scheduled_at <= %s""",
+                        (now, now + timedelta(hours=24))
+                    )
+                    row = cur.fetchone()
+                    depth = row[0] if row else 0
+        except Exception:
+            pass
+    return jsonify({'depth': depth})
+
+
 # ---------------------------------------------------------------------------
 # Password reset helpers + routes
 # ---------------------------------------------------------------------------
@@ -4560,13 +4630,10 @@ def email_report(job_id):
     operation  = report.get('operation', 'Unknown Operation')
     report_url = f'{APP_BASE_URL}/job/{job_id}'
     subject, html_body = _build_report_html(operation, report, report_url)
-    # Try report@ first, fall back to hello@ — synchronous so failures surface to the user
-    r1 = _smtp_send(REPORT_SMTP_USER, REPORT_SMTP_PASS, to_email, subject, html_body)
-    if r1 is not True:
-        r2 = _smtp_send(HELLO_SMTP_USER, HELLO_SMTP_PASS, to_email, subject, html_body)
-        if r2 is not True:
-            detail = (r1 or r2) if isinstance(r1, str) or isinstance(r2, str) else 'No app password configured'
-            return jsonify({'ok': False, 'error': f'Send failed: {detail}'}), 500
+    result = _resend_send(to_email, subject, html_body)
+    if result is not True:
+        detail = result if isinstance(result, str) else 'Send failed'
+        return jsonify({'ok': False, 'error': detail}), 500
     return jsonify({'ok': True})
 
 
@@ -5228,6 +5295,19 @@ def schedule_page_html(user_email: str) -> str:
     credits = get_user_credits(user_email) if user_email else 0
     admin   = is_admin(user_email)
 
+    # Read saved timezone
+    saved_tz = 'UTC'
+    if user_email and DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT timezone FROM users WHERE email = %s", (user_email,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        saved_tz = row[0]
+        except Exception:
+            pass
+
     if not user_email:
         return """
         <div class="page-title">Schedule a Check</div>
@@ -5250,44 +5330,63 @@ def schedule_page_html(user_email: str) -> str:
           <a href="/pricing" class="btn-primary" style="text-decoration:none;display:inline-block">View Pricing</a>
         </div>"""
 
-    return """
+    saved_tz_js = json.dumps(saved_tz)
+    return f"""
     <div class="page-title">Schedule a Check</div>
-    <div class="page-subtitle">Pick a time slot &mdash; your check runs automatically and the report arrives by email. Slots every 10 minutes, first-come first-serve.</div>
+    <div class="page-subtitle">Pick a date and time &mdash; your check runs automatically and the report arrives by email. 78 slots per day, first-come first-serve.</div>
 
+    <!-- Timezone selector -->
+    <div class="card" style="padding:14px 20px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap">Your Timezone</span>
+        <select id="tzSelect" onchange="onTzChange(this.value)" style="flex:1;min-width:200px;padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)"></select>
+      </div>
+    </div>
+
+    <!-- Next Available -->
+    <div class="next-avail-box" id="nextAvailBox" onclick="clickNextAvail()">
+      <div>
+        <div class="next-avail-label">Next Available Slot</div>
+        <div style="font-size:.76rem;color:var(--muted);margin-top:2px" id="nextAvailAhead">&nbsp;</div>
+        <div class="next-avail-time" id="nextAvailTime">Loading&hellip;</div>
+      </div>
+      <div class="next-avail-arrow">&#8594;</div>
+    </div>
+
+    <!-- Calendar -->
     <div class="card">
-      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Check Details</div>
+      <div class="cal-header">
+        <button class="cal-nav-btn" id="calPrev" onclick="calNav(-1)">&#8592;</button>
+        <div class="cal-month-label" id="calMonthLabel"></div>
+        <button class="cal-nav-btn" id="calNext" onclick="calNav(1)">&#8594;</button>
+      </div>
+      <div class="cal-weekdays">
+        <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <!-- Time slots (shown after day click) -->
+    <div class="card" id="slotsCard" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div>
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)">Available Times</div>
+          <div id="slotsDateLabel" style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px"></div>
+        </div>
+      </div>
+      <div id="slotLoading" style="text-align:center;padding:20px;color:var(--muted);font-size:.84rem">Loading slots&hellip;</div>
+      <div class="slot-wrap" id="slotWrap" style="display:none"><div id="slotGrid"></div></div>
+    </div>
+
+    <!-- Booking form (shown after slot click) -->
+    <div class="card" id="bookingCard" style="display:none">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Booking Details</div>
+      <div id="bookingSlotBadge" style="background:var(--lavender);border:1.5px solid rgba(111,94,247,.3);border-radius:10px;padding:8px 14px;font-size:.85rem;font-weight:700;color:var(--primary-dark);margin-bottom:16px;display:inline-block"></div>
       <label>Operation Name</label>
       <input type="text" id="schedOp" placeholder="e.g. Green Hills Farm" style="margin-bottom:14px">
       <label>Website URL</label>
-      <input type="text" id="schedUrl" placeholder="https://example.com">
-    </div>
-
-    <div class="card">
-      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Choose a Time Slot</div>
-
-      <div class="next-avail-box" id="nextAvailBox" onclick="selectNextAvailable()">
-        <div>
-          <div class="next-avail-label">Next Available</div>
-          <div class="next-avail-time" id="nextAvailTime">Loading&hellip;</div>
-        </div>
-        <div class="next-avail-arrow">&#8594;</div>
-      </div>
-
-      <div style="font-size:.76rem;color:var(--muted);text-align:center;margin-bottom:12px">or choose a specific day &mdash; <span style="font-style:italic">times shown in your local timezone</span></div>
-
-      <div class="day-tabs" id="dayTabs"></div>
-
-      <div id="slotLoading" style="text-align:center;padding:20px;color:var(--muted);font-size:.84rem">Loading slots&hellip;</div>
-      <div class="slot-wrap" id="slotGrid" style="display:none"></div>
-
-      <div class="selected-slot-display" id="selectedDisplay">
-        &#128197; Booked for: <span id="selectedSlotText"></span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Report Delivery</div>
-      <div style="display:flex;gap:20px;margin-bottom:16px">
+      <input type="text" id="schedUrl" placeholder="https://example.com" style="margin-bottom:18px">
+      <div style="display:flex;gap:20px;margin-bottom:18px">
         <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
           <input type="radio" name="rptFmt" value="html" checked> Email (HTML)
         </label>
@@ -5295,269 +5394,363 @@ def schedule_page_html(user_email: str) -> str:
           <input type="radio" name="rptFmt" value="md"> Email + Markdown (.md)
         </label>
       </div>
-      <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" disabled style="width:100%;opacity:.5">Confirm Booking</button>
-      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 Checker burned when your report runs &mdash; not at booking</div>
+      <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" style="width:100%">Confirm Booking</button>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 Checker used when your check runs &mdash; not at booking time</div>
     </div>
 
+    <!-- My scheduled checks -->
     <div class="card">
       <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px">Your Scheduled Checks</div>
       <div id="myChecksList"><div style="text-align:center;color:var(--muted);font-size:.84rem;padding:20px">Loading&hellip;</div></div>
     </div>
 
     <script>
+    // ── Config ────────────────────────────────────────────────────────────
+    var SLOT_START_H = 8;
+    var SLOT_END_H   = 21;
+    var SLOT_MIN     = 10;
+    var _userTz      = {saved_tz_js};
     var _selectedSlot = null;
+    var _calYear, _calMonth;
     var _nextAvailIso = null;
-    var _initialLoad  = true;
+    var _selectedCalDay = null;
 
-    // ── Day tabs ──────────────────────────────────────────────────────────
-    function buildDayTabs() {
-      var tabs = document.getElementById('dayTabs');
-      tabs.innerHTML = '';
+    // ── Timezone ──────────────────────────────────────────────────────────
+    var TZ_LIST = [
+      'UTC',
+      'America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
+      'America/Anchorage','Pacific/Honolulu','America/Toronto','America/Vancouver',
+      'America/Phoenix','America/Sao_Paulo','America/Argentina/Buenos_Aires',
+      'America/Mexico_City','America/Bogota','America/Lima','America/Santiago',
+      'Europe/London','Europe/Paris','Europe/Berlin','Europe/Madrid','Europe/Rome',
+      'Europe/Amsterdam','Europe/Zurich','Europe/Warsaw','Europe/Prague',
+      'Europe/Athens','Europe/Helsinki','Europe/Stockholm','Europe/Oslo',
+      'Europe/Lisbon','Europe/Dublin','Europe/Bucharest','Europe/Istanbul',
+      'Europe/Moscow','Europe/Kiev','Europe/Minsk',
+      'Asia/Dubai','Asia/Kolkata','Asia/Dhaka','Asia/Karachi',
+      'Asia/Bangkok','Asia/Jakarta','Asia/Singapore','Asia/Shanghai',
+      'Asia/Hong_Kong','Asia/Seoul','Asia/Tokyo',
+      'Australia/Sydney','Australia/Melbourne','Australia/Brisbane',
+      'Australia/Adelaide','Australia/Perth','Pacific/Auckland',
+      'Pacific/Fiji','Pacific/Guam','Africa/Cairo','Africa/Nairobi',
+      'Africa/Lagos','Africa/Johannesburg'
+    ];
+
+    function buildTzSelect() {{
+      var sel = document.getElementById('tzSelect');
+      var detected = '';
+      try {{ detected = Intl.DateTimeFormat().resolvedOptions().timeZone; }} catch(e) {{}}
+      var chosen = (_userTz && _userTz !== 'UTC') ? _userTz : (detected || 'UTC');
+      if (detected && TZ_LIST.indexOf(detected) === -1) {{
+        var opt = document.createElement('option');
+        opt.value = detected; opt.textContent = detected.replace(/_/g,' ');
+        sel.appendChild(opt);
+      }}
+      TZ_LIST.forEach(function(tz) {{
+        var opt = document.createElement('option');
+        opt.value = tz; opt.textContent = tz.replace(/_/g,' ');
+        sel.appendChild(opt);
+      }});
+      sel.value = chosen;
+      if (!sel.value) sel.value = 'UTC';
+      _userTz = sel.value;
+    }}
+
+    function onTzChange(tz) {{
+      _userTz = tz;
+      fetch('/api/user/timezone', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{timezone:tz}})}});
+      if (_nextAvailIso) document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
+      renderCalendar(_calYear, _calMonth);
+      if (_selectedCalDay) loadSlots(_selectedCalDay);
+    }}
+
+    // ── Date helpers ──────────────────────────────────────────────────────
+    function fmtSlotLocal(isoUtc) {{
+      var d = new Date(isoUtc);
+      try {{
+        return d.toLocaleString([], {{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:_userTz,timeZoneName:'short'}});
+      }} catch(e) {{
+        return d.toLocaleString([], {{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}});
+      }}
+    }}
+
+    function utcIsoToLocalDate(isoUtc) {{
+      var d = new Date(isoUtc);
+      try {{
+        return new Intl.DateTimeFormat('en-CA', {{timeZone:_userTz,year:'numeric',month:'2-digit',day:'2-digit'}}).format(d);
+      }} catch(e) {{ return isoUtc.slice(0,10); }}
+    }}
+
+    function localDateLabel(dateStr) {{
+      var parts = dateStr.split('-');
+      var d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+      return d.toLocaleDateString([], {{weekday:'long',year:'numeric',month:'long',day:'numeric'}});
+    }}
+
+    // ── Calendar ──────────────────────────────────────────────────────────
+    var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    function calInit() {{
       var now = new Date();
-      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      for (var i = 0; i < 7; i++) {
-        // Use UTC date so tab dates align with UTC-based slot ISO strings
-        var d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i));
-        var label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' :
-                    days[d.getUTCDay()] + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCDate();
-        var ds = d.toISOString().slice(0, 10);
-        var btn = document.createElement('button');
-        btn.className = 'day-tab' + (i === 0 ? ' active' : '');
-        btn.textContent = label;
-        btn.dataset.date = ds;
-        btn.onclick = (function(date, el) {
-          return function() {
-            document.querySelectorAll('.day-tab').forEach(function(t){t.classList.remove('active');});
-            el.classList.add('active');
-            loadSlots(date);
-          };
-        })(ds, btn);
-        tabs.appendChild(btn);
-      }
-    }
+      _calYear = now.getFullYear();
+      _calMonth = now.getMonth();
+      renderCalendar(_calYear, _calMonth);
+    }}
+
+    function calNav(dir) {{
+      _calMonth += dir;
+      if (_calMonth > 11) {{ _calMonth = 0; _calYear++; }}
+      if (_calMonth < 0)  {{ _calMonth = 11; _calYear--; }}
+      renderCalendar(_calYear, _calMonth);
+    }}
+
+    function renderCalendar(year, month) {{
+      document.getElementById('calMonthLabel').textContent = MONTH_NAMES[month] + ' ' + year;
+      var grid = document.getElementById('calGrid');
+      grid.innerHTML = '';
+      var todayLocal = utcIsoToLocalDate(new Date().toISOString());
+      var firstDay = new Date(year, month, 1).getDay();
+      var daysInMonth = new Date(year, month+1, 0).getDate();
+      var nowM = new Date();
+      document.getElementById('calPrev').disabled = (year === nowM.getFullYear() && month === nowM.getMonth());
+      for (var i = 0; i < firstDay; i++) {{
+        var blank = document.createElement('div');
+        blank.className = 'cal-day cal-blank';
+        grid.appendChild(blank);
+      }}
+      for (var d = 1; d <= daysInMonth; d++) {{
+        var ds = year + '-' + String(month+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+        var cell = document.createElement('div');
+        cell.className = 'cal-day';
+        cell.textContent = d;
+        cell.dataset.date = ds;
+        if (ds < todayLocal) {{
+          cell.classList.add('cal-day-past');
+        }} else {{
+          cell.classList.add('cal-day-avail');
+          if (ds === _selectedCalDay) cell.classList.add('cal-day-selected');
+          cell.onclick = (function(dateStr, el) {{
+            return function() {{ selectCalDay(dateStr, el); }};
+          }})(ds, cell);
+        }}
+        grid.appendChild(cell);
+      }}
+    }}
+
+    function selectCalDay(dateStr, cellEl) {{
+      _selectedCalDay = dateStr;
+      document.querySelectorAll('.cal-day').forEach(function(c) {{ c.classList.remove('cal-day-selected'); }});
+      if (cellEl) cellEl.classList.add('cal-day-selected');
+      document.getElementById('slotsCard').style.display = '';
+      document.getElementById('slotsDateLabel').textContent = localDateLabel(dateStr);
+      loadSlots(dateStr);
+    }}
 
     // ── Slot grid ─────────────────────────────────────────────────────────
-    function loadSlots(dateStr) {
+    function loadSlots(localDateStr) {{
       document.getElementById('slotLoading').style.display = '';
-      document.getElementById('slotGrid').style.display = 'none';
-      fetch('/api/available-slots?date=' + dateStr)
-        .then(function(r){return r.json();})
-        .then(function(data) {
-          var booked = new Set(data.booked || []);
-          if (data.next_available && !_selectedSlot) {
-            _nextAvailIso = data.next_available;
-            document.getElementById('nextAvailTime').textContent = fmtSlot(data.next_available);
-            // On first load: if next available slot is on a different day, auto-switch to that day
-            if (_initialLoad) {
-              _initialLoad = false;
-              var nextDs = data.next_available.slice(0, 10);
-              if (nextDs !== dateStr) {
-                document.querySelectorAll('.day-tab').forEach(function(t){
-                  t.classList.toggle('active', t.dataset.date === nextDs);
-                });
-                loadSlots(nextDs);
-                return;
-              }
-            }
-          }
-          _initialLoad = false;
-          renderSlotGrid(dateStr, booked);
-        })
-        .catch(function(){
-          document.getElementById('slotLoading').style.display = 'none';
-          document.getElementById('slotGrid').style.display = '';
-          document.getElementById('slotGrid').innerHTML = '<div style="color:var(--muted);padding:12px">Unable to load slots.</div>';
-        });
-    }
+      document.getElementById('slotWrap').style.display = 'none';
+      var parts = localDateStr.split('-');
+      var localY = parseInt(parts[0]), localM = parseInt(parts[1])-1, localD = parseInt(parts[2]);
+      var utcDates = new Set();
+      for (var offset = -1; offset <= 1; offset++) {{
+        var d = new Date(Date.UTC(localY, localM, localD + offset));
+        utcDates.add(d.toISOString().slice(0,10));
+      }}
+      var promises = Array.from(utcDates).map(function(utcDate) {{
+        return fetch('/api/available-slots?date=' + utcDate).then(function(r){{ return r.json(); }});
+      }});
+      Promise.all(promises).then(function(results) {{
+        var booked = new Set();
+        results.forEach(function(data) {{ (data.booked || []).forEach(function(s) {{ booked.add(s); }}); }});
+        if (results[0] && results[0].next_available) {{
+          _nextAvailIso = results[0].next_available;
+          document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
+        }}
+        renderSlotGrid(localDateStr, booked);
+      }}).catch(function() {{
+        document.getElementById('slotLoading').style.display = 'none';
+        document.getElementById('slotGrid').innerHTML = '<div style="color:var(--muted);padding:12px;text-align:center">Unable to load slots.</div>';
+        document.getElementById('slotWrap').style.display = '';
+      }});
+    }}
 
-    function renderSlotGrid(dateStr, bookedSet) {
-      var grid   = document.getElementById('slotGrid');
-      var wrap   = document.querySelector('.slot-wrap');
-      var now    = new Date();
-      var cutoff = new Date(now.getTime() + 5 * 60000);
+    function renderSlotGrid(localDateStr, bookedUtcSet) {{
+      var grid = document.getElementById('slotGrid');
       grid.innerHTML = '';
-      var firstAvailTop = null;
-      for (var hour = 0; hour < 24; hour++) {
-        var row = document.createElement('div');
-        row.className = 'hour-row';
-        var lbl = document.createElement('div');
-        lbl.className = 'hour-label';
-        var lblDt = new Date(dateStr + 'T' + String(hour).padStart(2,'0') + ':00:00Z');
-        lbl.textContent = lblDt.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
-        row.appendChild(lbl);
-        var slotsDiv = document.createElement('div');
-        slotsDiv.className = 'hour-slots';
-        for (var m = 0; m < 60; m += 10) {
-          var isoStr  = dateStr + 'T' + String(hour).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':00Z';
-          var slotDt  = new Date(isoStr);
-          var isPast  = slotDt < cutoff;
-          var isBooked = bookedSet.has(isoStr);
-          var isSel   = _selectedSlot === isoStr;
-          var btn = document.createElement('button');
-          btn.className = 'slot-btn ' + (isSel ? 'selected' : isPast ? 'past' : isBooked ? 'booked' : 'avail');
-          btn.dataset.iso = isoStr;
-          btn.textContent = slotDt.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
-          btn.disabled = isPast || isBooked;
-          if (!isPast && !isBooked) {
-            btn.onclick = (function(iso){return function(){selectSlot(iso);};})(isoStr);
-            if (firstAvailTop === null) firstAvailTop = row.offsetTop;
-          }
-          slotsDiv.appendChild(btn);
-        }
-        row.appendChild(slotsDiv);
-        grid.appendChild(row);
-      }
+      var now = new Date();
+      var cutoff = new Date(now.getTime() + 5 * 60000);
+      var parts = localDateStr.split('-');
+      var localY = parseInt(parts[0]), localM = parseInt(parts[1])-1, localD = parseInt(parts[2]);
+      var slots = [];
+      for (var offset = -1; offset <= 1; offset++) {{
+        var d = new Date(Date.UTC(localY, localM, localD + offset));
+        var utcDate = d.toISOString().slice(0,10);
+        for (var h = SLOT_START_H; h < SLOT_END_H; h++) {{
+          for (var m = 0; m < 60; m += SLOT_MIN) {{
+            var isoStr = utcDate + 'T' + String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':00Z';
+            if (utcIsoToLocalDate(isoStr) !== localDateStr) continue;
+            var slotDt = new Date(isoStr);
+            slots.push({{
+              iso: isoStr, dt: slotDt,
+              isPast: slotDt < cutoff,
+              isBooked: bookedUtcSet.has(isoStr),
+              label: slotDt.toLocaleTimeString([], {{hour:'numeric',minute:'2-digit',timeZone:_userTz}})
+            }});
+          }}
+        }}
+      }}
+      if (slots.length === 0) {{
+        grid.innerHTML = '<div style="color:var(--muted);padding:16px;text-align:center;font-size:.85rem">No slots this day &mdash; available 8am&ndash;9pm UTC</div>';
+        document.getElementById('slotLoading').style.display = 'none';
+        document.getElementById('slotWrap').style.display = '';
+        return;
+      }}
+      slots.forEach(function(s) {{
+        var btn = document.createElement('button');
+        btn.dataset.iso = s.iso;
+        if (s.isPast) {{
+          btn.className = 'slot-btn past'; btn.disabled = true; btn.textContent = s.label;
+        }} else if (s.isBooked) {{
+          btn.className = 'slot-btn booked'; btn.disabled = true; btn.textContent = s.label + ' (scheduled)';
+        }} else {{
+          btn.className = 'slot-btn ' + (_selectedSlot === s.iso ? 'selected' : 'avail');
+          btn.textContent = s.label;
+          btn.onclick = (function(iso){{ return function(){{ selectSlot(iso); }}; }})(s.iso);
+        }}
+        grid.appendChild(btn);
+      }});
       document.getElementById('slotLoading').style.display = 'none';
-      grid.style.display = '';
-      // Scroll container to first available slot
-      if (wrap && firstAvailTop !== null) wrap.scrollTop = firstAvailTop;
-    }
+      document.getElementById('slotWrap').style.display = '';
+      var firstAvail = grid.querySelector('.slot-btn.avail, .slot-btn.selected');
+      if (firstAvail) firstAvail.scrollIntoView({{behavior:'smooth',block:'nearest'}});
+    }}
 
-    function fmtSlot(isoStr) {
-      var d = new Date(isoStr);
-      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate() +
-             ' \u00b7 ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    }
-
-    function selectSlot(isoStr) {
+    function selectSlot(isoStr) {{
       _selectedSlot = isoStr;
-      document.querySelectorAll('.slot-btn').forEach(function(b){
+      document.querySelectorAll('.slot-btn').forEach(function(b) {{
         if (b.disabled) return;
         b.className = 'slot-btn ' + (b.dataset.iso === isoStr ? 'selected' : 'avail');
-      });
-      var disp = document.getElementById('selectedDisplay');
-      disp.style.display = '';
-      document.getElementById('selectedSlotText').textContent = fmtSlot(isoStr);
-      var btn = document.getElementById('confirmBtn');
-      btn.disabled = false;
-      btn.style.opacity = '1';
-    }
+      }});
+      var card = document.getElementById('bookingCard');
+      card.style.display = '';
+      document.getElementById('bookingSlotBadge').textContent = '\U0001F4C5 ' + fmtSlotLocal(isoStr);
+      setTimeout(function() {{ card.scrollIntoView({{behavior:'smooth',block:'nearest'}}); }}, 80);
+    }}
 
-    function loadActiveDay() {
-      var active = document.querySelector('.day-tab.active');
-      if (active) loadSlots(active.dataset.date);
-    }
+    // ── Next Available polling ────────────────────────────────────────────
+    function pollNextAvail() {{
+      fetch('/api/available-slots?date=' + new Date().toISOString().slice(0,10))
+        .then(function(r){{ return r.json(); }})
+        .then(function(data) {{
+          if (data.next_available) {{
+            _nextAvailIso = data.next_available;
+            document.getElementById('nextAvailTime').textContent = fmtSlotLocal(data.next_available);
+          }}
+          return fetch('/api/queue-depth');
+        }})
+        .then(function(r){{ return r.json(); }})
+        .then(function(data) {{
+          var ahead = data.depth || 0;
+          document.getElementById('nextAvailAhead').textContent =
+            ahead === 0 ? 'No jobs ahead — available now' :
+            (ahead + ' job' + (ahead !== 1 ? 's' : '') + ' ahead in queue');
+        }})
+        .catch(function() {{}});
+    }}
 
-    function selectNextAvailable() {
+    function clickNextAvail() {{
       if (!_nextAvailIso) return;
-      // _nextAvailIso is UTC; extract UTC date for the tab lookup
-      var ds = _nextAvailIso.slice(0, 10);
-      var found = false;
-      document.querySelectorAll('.day-tab').forEach(function(t){
-        if (t.dataset.date === ds) {
-          document.querySelectorAll('.day-tab').forEach(function(x){x.classList.remove('active');});
-          t.classList.add('active');
-          found = true;
-        }
-      });
-      _selectedSlot = _nextAvailIso;
-      if (found) {
-        loadSlots(ds); // grid re-renders with _selectedSlot already set — correct slot highlighted
-      }
-      var disp = document.getElementById('selectedDisplay');
-      disp.style.display = '';
-      document.getElementById('selectedSlotText').textContent = fmtSlot(_nextAvailIso);
-      var btn = document.getElementById('confirmBtn');
-      btn.disabled = false;
-      btn.style.opacity = '1';
-    }
+      var localDs = utcIsoToLocalDate(_nextAvailIso);
+      var parts = localDs.split('-');
+      _calYear = parseInt(parts[0]); _calMonth = parseInt(parts[1]) - 1;
+      renderCalendar(_calYear, _calMonth);
+      var cell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === localDs; }});
+      selectCalDay(localDs, cell || null);
+      setTimeout(function() {{
+        _selectedSlot = _nextAvailIso;
+        if (_selectedCalDay) loadSlots(_selectedCalDay);
+      }}, 300);
+    }}
 
     // ── Booking ───────────────────────────────────────────────────────────
-    async function confirmBooking() {
+    async function confirmBooking() {{
       var op  = document.getElementById('schedOp').value.trim();
       var url = document.getElementById('schedUrl').value.trim();
-      if (!op || !url) { alert('Please enter operation name and website URL.'); return; }
-      if (!_selectedSlot) { alert('Please select a time slot.'); return; }
+      if (!op || !url) {{ alert('Please enter operation name and website URL.'); return; }}
+      if (!_selectedSlot) {{ alert('Please select a time slot.'); return; }}
       if (!url.startsWith('http')) url = 'https://' + url;
       var btn = document.getElementById('confirmBtn');
       btn.disabled = true; btn.textContent = 'Booking\u2026';
-      try {
+      try {{
         var fmt = document.querySelector('input[name="rptFmt"]:checked');
-        var report_format = fmt ? fmt.value : 'html';
-        var res = await fetch('/api/schedule-check', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({operation: op, website: url, scheduled_at: _selectedSlot, report_format: report_format})
-        });
+        var res = await fetch('/api/schedule-check', {{
+          method: 'POST', headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{operation: op, website: url, scheduled_at: _selectedSlot, report_format: fmt ? fmt.value : 'html'}})
+        }});
         var data = await res.json();
-        if (data.ok) {
+        if (data.ok) {{
           _selectedSlot = null;
-          document.getElementById('selectedDisplay').style.display = 'none';
+          document.getElementById('bookingCard').style.display = 'none';
           document.getElementById('schedOp').value = '';
           document.getElementById('schedUrl').value = '';
-          btn.textContent = 'Booked!';
-          btn.style.background = 'var(--green)';
-          setTimeout(function(){
-            btn.textContent = 'Confirm Booking';
-            btn.style.background = '';
-            btn.disabled = true; btn.style.opacity = '.5';
-          }, 2500);
-          loadActiveDay();
-          loadMyChecks();
-        } else {
+          btn.textContent = 'Booked!'; btn.style.background = 'var(--green)';
+          setTimeout(function() {{ btn.textContent = 'Confirm Booking'; btn.style.background = ''; btn.disabled = false; }}, 2500);
+          if (_selectedCalDay) loadSlots(_selectedCalDay);
+          loadMyChecks(); pollNextAvail();
+        }} else {{
           alert(data.error || 'Booking failed. Please try again.');
           btn.disabled = false; btn.textContent = 'Confirm Booking';
-        }
-      } catch(e) {
+        }}
+      }} catch(e) {{
         alert('Network error. Please try again.');
         btn.disabled = false; btn.textContent = 'Confirm Booking';
-      }
-    }
+      }}
+    }}
 
     // ── My scheduled checks ───────────────────────────────────────────────
-    async function loadMyChecks() {
-      try {
+    async function loadMyChecks() {{
+      try {{
         var res = await fetch('/api/my-scheduled-checks');
         var data = await res.json();
         var el = document.getElementById('myChecksList');
-        if (!data.checks || data.checks.length === 0) {
+        if (!data.checks || data.checks.length === 0) {{
           el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:.84rem;padding:16px">No scheduled checks yet.</div>';
           return;
-        }
+        }}
         var html = '';
-        data.checks.forEach(function(c) {
-          var badgeClass = 'badge-' + c.status;
+        data.checks.forEach(function(c) {{
           var actions = '';
-          if (c.status === 'scheduled') {
-            actions = '<button class="sched-cancel-btn" onclick="cancelCheck(\''+c.id+'\')">Cancel</button>';
-          } else if (c.status === 'done') {
-            actions = '<a class="sched-view-btn" href="/scheduled-report/'+c.id+'">View</a>';
-          }
-          html += '<div class="sched-list-item">' +
-            '<div class="sched-item-info">' +
-              '<div class="sched-item-op">'+escHtml(c.operation_name)+'</div>' +
-              '<div class="sched-item-when">'+fmtSlot(c.scheduled_at)+'</div>' +
-            '</div>' +
-            '<span class="sched-item-badge '+badgeClass+'">'+c.status+'</span>' +
-            actions +
-          '</div>';
-        });
+          if (c.status === 'scheduled') actions = '<button class="sched-cancel-btn" onclick="cancelCheck(\'' + c.id + '\')">Cancel</button>';
+          else if (c.status === 'done') actions = '<a class="sched-view-btn" href="/scheduled-report/' + c.id + '">View</a>';
+          html += '<div class="sched-list-item"><div class="sched-item-info">' +
+            '<div class="sched-item-op">' + escHtml(c.operation_name) + '</div>' +
+            '<div class="sched-item-when">' + fmtSlotLocal(c.scheduled_at) + '</div></div>' +
+            '<span class="sched-item-badge badge-' + c.status + '">' + c.status + '</span>' + actions + '</div>';
+        }});
         el.innerHTML = html;
-      } catch(e) {
-        document.getElementById('myChecksList').innerHTML =
-          '<div style="color:var(--muted);font-size:.84rem;padding:12px">Unable to load.</div>';
-      }
-    }
+      }} catch(e) {{
+        document.getElementById('myChecksList').innerHTML = '<div style="color:var(--muted);font-size:.84rem;padding:12px">Unable to load.</div>';
+      }}
+    }}
 
-    async function cancelCheck(id) {
+    async function cancelCheck(id) {{
       if (!confirm('Cancel this scheduled check?')) return;
-      var res = await fetch('/api/cancel-scheduled/'+id, {method:'POST'});
+      var res = await fetch('/api/cancel-scheduled/' + id, {{method:'POST'}});
       var data = await res.json();
-      if (data.ok) { loadMyChecks(); loadActiveDay(); }
+      if (data.ok) {{ loadMyChecks(); if (_selectedCalDay) loadSlots(_selectedCalDay); pollNextAvail(); }}
       else alert(data.error || 'Cancel failed.');
-    }
+    }}
 
-    function escHtml(s) {
+    function escHtml(s) {{
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
+    }}
 
     // ── Init ──────────────────────────────────────────────────────────────
-    buildDayTabs();
-    var todayStr = new Date().toISOString().slice(0, 10);
-    loadSlots(todayStr);
+    buildTzSelect();
+    calInit();
+    pollNextAvail();
+    setInterval(pollNextAvail, 5000);
     loadMyChecks();
     </script>"""
 
