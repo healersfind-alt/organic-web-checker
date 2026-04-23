@@ -1923,7 +1923,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
-        <a class="dropdown-item" href="/schedule">Schedule a Check</a>
+        <a class="dropdown-item" href="/schedule">Schedule Checker</a>
         <a class="dropdown-item" href="/history">Check History</a>
         <a class="dropdown-item" href="/pricing">Pricing</a>
         <a class="dropdown-item" href="/agents">Agents &amp; API</a>
@@ -2703,7 +2703,7 @@ MAIN_HTML = """<!DOCTYPE html>
       </button>
       <div class="header-dropdown" id="hDd">
         <a class="dropdown-item" href="/account">Account</a>
-        <a class="dropdown-item" href="/schedule">Schedule a Check</a>
+        <a class="dropdown-item" href="/schedule">Schedule Checker</a>
         <a class="dropdown-item" href="/history">Check History</a>
         <a class="dropdown-item" href="/pricing">Pricing</a>
         <a class="dropdown-item" href="/agents">Agents &amp; API</a>
@@ -2977,8 +2977,8 @@ MAIN_HTML = """<!DOCTYPE html>
           <input type="checkbox" name="use_cache" value="1" style="width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0">
           Use cached OID data if available &mdash; skips live lookup (same cost, ~5s vs ~60s)
         </label>
-        <button type="submit" id="submitBtn">Run Check</button>
-        <a href="/schedule" class="btn-schedule"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Schedule a Check</a>
+        <button type="submit" id="submitBtn">Run Checker</button>
+        <a href="/schedule" class="btn-schedule"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Schedule Checker</a>
       </form>
     </div>
 
@@ -3063,7 +3063,7 @@ MAIN_HTML = """<!DOCTYPE html>
     const res  = await fetch('/check', {method:'POST', body: new URLSearchParams(new FormData(e.target))});
     const data = await res.json();
     viewingJobId = data.job_id;
-    btn.disabled = false; btn.textContent = 'Run Check';
+    btn.disabled = false; btn.textContent = 'Run Checker';
     refreshQueue();
     startPolling(data.job_id);
   });
@@ -5797,7 +5797,7 @@ def schedule_page_html(user_email: str) -> str:
 
     if not user_email:
         return """
-        <div class="page-title">Schedule a Check</div>
+        <div class="page-title">Schedule Checker</div>
         <div class="page-subtitle">Book a specific time slot and receive your report by email when it&rsquo;s ready.</div>
         <div class="card" style="text-align:center;padding:40px">
           <div style="font-size:2.5rem;margin-bottom:16px">&#128197;</div>
@@ -5808,7 +5808,7 @@ def schedule_page_html(user_email: str) -> str:
 
     if not admin and credits < 1:
         return """
-        <div class="page-title">Schedule a Check</div>
+        <div class="page-title">Schedule Checker</div>
         <div class="page-subtitle">Book a specific time slot and receive your report by email when it&rsquo;s ready.</div>
         <div class="card" style="text-align:center;padding:40px">
           <div style="font-size:2.5rem;margin-bottom:16px">&#128199;</div>
@@ -5842,7 +5842,7 @@ def schedule_page_html(user_email: str) -> str:
     )
     saved_tz_js = json.dumps(saved_tz)
     return f"""
-    <div class="page-title">Schedule a Check</div>
+    <div class="page-title">Schedule Checker</div>
     <div class="page-subtitle">Pick a date and time &mdash; your check runs automatically and the report arrives by email. 78 slots per day, first-come first-serve.</div>
 
     <!-- Timezone selector -->
@@ -6256,7 +6256,7 @@ def schedule():
     email = get_logged_in_email()
     body  = schedule_page_html(email)
     return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
-                                  page_title='Schedule a Check', active='schedule', body=body)
+                                  page_title='Schedule Checker', active='schedule', body=body)
 
 
 @app.route('/api/available-slots')
