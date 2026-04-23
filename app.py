@@ -5500,6 +5500,46 @@ def admin_certifier_status(req_id):
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
+@app.route('/admin/grant-credit', methods=['GET', 'POST'])
+def admin_grant_credit():
+    if get_logged_in_email() != ADMIN_EMAIL:
+        return 'Unauthorized', 403
+    msg = ''
+    if request.method == 'POST':
+        target_email = (request.form.get('email') or '').strip().lower()
+        try:
+            amount = max(1, int(request.form.get('amount') or 1))
+        except (ValueError, TypeError):
+            amount = 1
+        if target_email and amount > 0 and DATABASE_URL:
+            try:
+                with db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """INSERT INTO users (email, password_hash, credits)
+                               VALUES (%s, '', %s)
+                               ON CONFLICT (email) DO UPDATE
+                               SET credits = users.credits + EXCLUDED.credits""",
+                            (target_email, amount)
+                        )
+                    conn.commit()
+                msg = f'Granted {amount} credit(s) to {target_email} ✓'
+            except Exception as e:
+                msg = f'Error: {e}'
+        else:
+            msg = 'Missing email or invalid amount.'
+    return f"""<html><body style="font-family:monospace;padding:20px">
+<h2>Admin — Grant Credits</h2>
+<form method="POST">
+  <label>Email: <input name="email" type="email" size="40" required></label><br><br>
+  <label>Credits to add: <input name="amount" type="number" value="1" min="1" max="100"></label><br><br>
+  <button type="submit">Grant Credits</button>
+</form>
+{f'<p style="color:green"><b>{msg}</b></p>' if msg else ''}
+<p><a href="/admin/scheduler-status">← Scheduler Status</a></p>
+</body></html>"""
+
+
 @app.route('/admin/test-email')
 def admin_test_email():
     if get_logged_in_email() != ADMIN_EMAIL:
@@ -5843,7 +5883,7 @@ def schedule_page_html(user_email: str) -> str:
     saved_tz_js = json.dumps(saved_tz)
     return f"""
     <div class="page-title">Schedule Checker</div>
-    <div class="page-subtitle">Pick a date and time &mdash; your check runs automatically and the report arrives by email. 78 slots per day, first-come first-serve.</div>
+    <div class="page-subtitle">Pick a date and time &mdash; your check runs automatically and the report arrives by email. 78 slots per day, first-come first-serve. Slots available daily 8&nbsp;am&nbsp;&ndash;&nbsp;9&nbsp;pm&nbsp;UTC.</div>
 
     <!-- Timezone selector -->
     <div class="card" style="padding:14px 20px">
@@ -6231,19 +6271,20 @@ def schedule_page_html(user_email: str) -> str:
     // ── Init ──────────────────────────────────────────────────────────────
     calInit();
     // Show next available immediately from server-injected value
+    var naEl = document.getElementById('nextAvailTime');
     if (_nextAvailIso) {{
-      document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
+      try {{ naEl.textContent = fmtSlotLocal(_nextAvailIso); }} catch(e) {{ naEl.textContent = _nextAvailIso; }}
     }} else {{
-      document.getElementById('nextAvailTime').textContent = 'No slots available';
+      naEl.textContent = 'No slots in next 30 days';
     }}
-    // Auto-load today's slots so the grid is visible on arrival
-    var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
-    var todayCell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === todayLocalDs; }});
-    if (todayCell) {{
-      selectCalDay(todayLocalDs, todayCell);
-    }} else if (_nextAvailIso) {{
-      // Today has no available slots — jump to next available day instead
+    // Always jump directly to the day containing the next available slot so
+    // the user sees green bookable buttons immediately — not a full grey grid.
+    if (_nextAvailIso) {{
       clickNextAvail();
+    }} else {{
+      var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
+      var todayCell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === todayLocalDs; }});
+      if (todayCell) selectCalDay(todayLocalDs, todayCell);
     }}
     pollNextAvail();
     setInterval(pollNextAvail, 5000);
