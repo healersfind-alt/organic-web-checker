@@ -1095,8 +1095,8 @@ GLOBAL_CSS = """
     display: flex; align-items: center; gap: 12px; text-decoration: none;
     overflow: hidden;
   }
-  .header-logo-icon { width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px; }
-  .header-wordmark  { font-size: 1.1rem; font-weight: 800; }
+  .header-logo-icon { width: 144px; height: 144px; flex-shrink: 0; border-radius: 14px; }
+  .header-wordmark  { font-size: 1.75rem; font-weight: 800; }
   header h1 { font-size: 1.75rem; font-weight: 800; }
   /* Two-color wordmark — "Organic" accent lavender, "Web Checker" white */
   .wm-organic { color: #A99DFF; }
@@ -1666,7 +1666,7 @@ GLOBAL_CSS = """
     .header-nav { display: none; }
     .header-credits-wrap { display: none; }
     .header-wordmark { font-size: .88rem; }
-    .header-logo-icon { width: 28px; height: 28px; border-radius: 6px; }
+    .header-logo-icon { width: 72px; height: 72px; border-radius: 10px; }
     .header-icon { width: 36px; height: 36px; }
     .header-cta-btn { padding: 8px 14px; font-size: .8rem; }
     .nav-user-email { font-size: .75rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
