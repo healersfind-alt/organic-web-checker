@@ -781,11 +781,8 @@ def run_check(operation_name: str, website_url: str,
     # When cert lists only general commodity terms (e.g. "Eggs", "Wine") the
     # specific SKUs on the website cannot be confirmed or denied from OID alone —
     # route unmatched items to caution rather than red flag.
-    cert_general   = cert_has_only_general_terms(cert["products"])
-    # Retailer-scope operations (HANDLING cert, Retailer business type) may be
-    # reselling pre-certified products under the retail exemption (§205.101(a)(2)).
-    # Unverified items route to caution for certifier review rather than hard flags.
-    cert_retailer  = (cert.get("business_type", "") == "Retailer")
+    cert_general  = cert_has_only_general_terms(cert["products"])
+    cert_retailer = (cert.get("business_type", "") == "Retailer")
 
     for product in organic_on_site:
         title = product['title']
@@ -808,15 +805,14 @@ def run_check(operation_name: str, website_url: str,
             continue
 
         # 4. No match
-        if cert_retailer:
-            # Retailer business type: product may be pre-certified resale covered
-            # by retail exemption (§205.101(a)(2)) — certifier must review
-            caution.append({**product, '_reason': 'retailer_exemption_review'})
-        elif cert_general:
+        if cert_general:
             # Cert shows general terms only; specific website claim can't be
             # verified from OID — escalate to yellow caution with a note
             caution.append({**product, '_reason': 'general_cert'})
         else:
+            # Certified operations (including Retailer-type handlers) are not
+            # exempt from OSP coverage. Retail exemption (§205.101(a)(2)) only
+            # applies to non-certified operations not present in OID.
             flagged.append(product)
 
     print(f"[4/4] Done. Flagged={len(flagged)}  Caution={len(caution)}  "
