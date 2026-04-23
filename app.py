@@ -918,15 +918,48 @@ def report_to_markdown(report: dict) -> str:
 
     # ── Handling scope notice ──────────────────────────────────────────────
     if 'HANDLING' in report.get('scope', []):
-        lines += [
-            "## ⓘ HANDLING OPERATION SCOPE NOTICE",
-            "This operation is certified as a handler (broker, distributor, importer, or processor).",
-            "Handler certificates typically list products at a general category level; specific branded",
-            "products are documented in the Organic System Plan (OSP) held by the certifier.",
-            "Flagged items below require verification of upstream supplier certification in the OSP.",
-            "Ref: 7 CFR § 205.201 (OSP requirements); SOE Rule (eff. March 19, 2024)",
-            "",
-        ]
+        bt = report.get('business_type', '')
+        if bt == 'Retailer':
+            lines += [
+                "## ⓘ RETAIL EXEMPTION NOTICE",
+                "This operation holds a HANDLING-scope certificate with a Retailer business type.",
+                "The retail exemption (7 CFR § 205.101(a)(2)) permits certified operations to sell",
+                "finished, pre-certified organic products to end consumers without listing each resale",
+                "product on their own certificate — provided no handling, repackaging, or relabeling",
+                "occurs through that channel. Caution items below may be covered by this exemption.",
+                "CERTIFIER MUST DETERMINE: Is each item a pre-certified resale product (exempt) or",
+                "the operation's own organic product that should appear on the cert and in the OSP?",
+                "Ref: 7 CFR § 205.101(a)(2) (retail exemption); § 205.201 (OSP); SOE Rule 88 FR 2799 (eff. March 19, 2024)",
+                "",
+            ]
+        elif bt == 'Importer':
+            lines += [
+                "## ⓘ HANDLING OPERATION SCOPE NOTICE — IMPORTER",
+                "Post-SOE (eff. March 19, 2024), all importers of organic products must hold NOP handler",
+                "certification. Website organic claims require both the importer's own NOP cert coverage",
+                "and verified foreign certification for each imported product.",
+                "Ref: 7 CFR § 205.201 (OSP); SOE Rule 88 FR 2799; § 205.2 (importer definition)",
+                "",
+            ]
+        elif bt in ('Broker', 'Trader'):
+            lines += [
+                f"## ⓘ HANDLING OPERATION SCOPE NOTICE — {bt.upper()}",
+                f"Post-SOE (eff. March 19, 2024), {bt.lower()}s handling organic products must be",
+                "NOP-certified handlers. Website organic product listings require upstream supplier",
+                "certification documented in the Organic System Plan (OSP).",
+                "Ref: 7 CFR § 205.201 (OSP); SOE Rule 88 FR 2799; § 205.2 (handler definition)",
+                "",
+            ]
+        else:
+            lines += [
+                "## ⓘ HANDLING OPERATION SCOPE NOTICE",
+                "This operation is certified as a handler (broker, distributor, importer, or processor).",
+                "Handler certificates typically list products at a general category level; specific branded",
+                "products are documented in the Organic System Plan (OSP) held by the certifier.",
+                "Flagged items below require verification of upstream supplier certification in the OSP.",
+                "Ref: 7 CFR § 205.201 (OSP requirements); SOE Rule (eff. March 19, 2024)",
+                "",
+            ]
 
     # ── Non-compliance flags ───────────────────────────────────────────────
     if flagged:
@@ -952,18 +985,34 @@ def report_to_markdown(report: dict) -> str:
         lines += ["## ✅ NO NON-COMPLIANCE FLAGS",
                   "All specific organic product claims match the OID certificate.", ""]
 
-    # ── Caution — name variations ──────────────────────────────────────────
+    # ── Caution — name variations / retailer review / general cert ────────
     if caution:
-        lines += [
-            f"## 🟡 NAME VARIATION / CAUTION ({len(caution)} items)",
-            "Products that closely resemble certified items but with possible name differences.",
-            "Not an NOP violation — requires certifier alignment review.",
-            "",
-        ]
-        for i, item in enumerate(caution, 1):
-            url = f" → {item['url']}" if item.get('url') else ""
-            lines.append(f"{i}. {item['title']}{url}")
-        lines.append("")
+        retailer_items = [c for c in caution if c.get('_reason') == 'retailer_exemption_review']
+        other_items    = [c for c in caution if c.get('_reason') != 'retailer_exemption_review']
+        if retailer_items:
+            lines += [
+                f"## 🟡 RETAILER EXEMPTION REVIEW ({len(retailer_items)} items)",
+                "Products not on this operation's OID certificate.",
+                "Certifier must determine: pre-certified resale (retail exemption applies — §205.101(a)(2))",
+                "OR operation's own organic product that must appear on the cert/OSP.",
+                "",
+            ]
+            for i, item in enumerate(retailer_items, 1):
+                url = f" → {item['url']}" if item.get('url') else ""
+                lines.append(f"{i}. {item['title']}{url}")
+            lines.append("")
+        if other_items:
+            lines += [
+                f"## 🟡 NAME VARIATION / CAUTION ({len(other_items)} items)",
+                "Products that closely resemble certified items but with possible name differences.",
+                "Not an NOP violation — requires certifier alignment review.",
+                "",
+            ]
+            for i, item in enumerate(other_items, 1):
+                url = f" → {item['url']}" if item.get('url') else ""
+                reason = " [GENERAL CERT]" if item.get('_reason') == 'general_cert' else ""
+                lines.append(f"{i}. {item['title']}{reason}{url}")
+            lines.append("")
 
     # ── Marketing language ─────────────────────────────────────────────────
     if marketing:
@@ -1993,6 +2042,19 @@ function updateAuthUI(email,credits){
 REPORT_PARTIAL = """
 {% if report.get('error') %}
   <div class="error-msg">{{ report['error'] }}</div>
+  {% if 'not found' in (report.get('error') or '') | lower %}
+  <div style="margin-top:14px;padding:13px 16px;border-radius:12px;background:#F5F3FF;border:1px solid rgba(111,94,247,.2);font-size:.78rem;line-height:1.65;color:var(--text)">
+    <strong style="color:var(--primary)">&#9432; Retail Exemption May Apply</strong><br>
+    If this operation sells only <strong>finished, pre-certified organic products</strong> to end consumers and
+    performs no handling, repackaging, or relabeling, it may qualify for the retail exemption and is not
+    required to hold its own NOP certificate or appear in OID.<br>
+    <span style="color:var(--muted);font-size:.72rem">
+      Ref: 7 CFR &sect;&nbsp;205.101(a)(2) (retail exemption) &bull;
+      If handling or processing occurs through this channel, handler certification is required under 7 CFR &sect;&nbsp;205.201.
+      Also verify the operation name matches the registered OID name exactly.
+    </span>
+  </div>
+  {% endif %}
 {% else %}
 
   <div class="report-header">
@@ -2041,7 +2103,15 @@ REPORT_PARTIAL = """
   <div style="margin-bottom:18px;padding:12px 16px;border-radius:14px;background:#EEE8FF;border:1px solid rgba(111,94,247,.2);font-size:.78rem;line-height:1.6;color:var(--text)">
     <strong style="color:var(--primary)">&#9432; Handling Operation Scope Notice</strong>
     {% if report.get('business_type') %}<span style="margin-left:6px;font-size:.65rem;padding:1px 7px;border-radius:20px;font-weight:600;background:#E4DEFF;color:#6F5EF7;border:1px solid rgba(111,94,247,.3)">{{ report.business_type }}</span>{% endif %}<br>
-    {% if report.get('business_type') == 'Importer' %}
+    {% if report.get('business_type') == 'Retailer' %}
+      This operation holds a HANDLING-scope certificate with a <strong>Retailer</strong> business type.
+      The <strong>retail exemption</strong> (7 CFR &sect;&nbsp;205.101(a)(2)) permits certified operations
+      to sell finished, pre-certified organic products to end consumers without listing each resale product
+      on their own certificate &mdash; provided no handling, repackaging, or relabeling occurs through that channel.
+      Items below that are not on this operation&rsquo;s certificate may be covered by the retail exemption
+      <em>or</em> may be the operation&rsquo;s own products that should appear in the Organic System Plan.
+      <strong>Certifier review is required</strong> to distinguish resale (exempt) from own-label claims (must be on cert).
+    {% elif report.get('business_type') == 'Importer' %}
       This operation is certified as an <strong>importer</strong>. Post-SOE (eff. March&nbsp;19,&nbsp;2024), all importers of
       organic products must hold NOP handler certification. Website organic claims require both the importer&rsquo;s
       own NOP cert coverage and verified foreign certification for each imported product.
@@ -2059,9 +2129,16 @@ REPORT_PARTIAL = """
       <strong>Organic System Plan (OSP)</strong> held by their certifier &mdash; not publicly visible in OID.
     {% endif %}<br>
     <span style="color:var(--muted);font-size:.72rem">
-      Flagged items below indicate products not found on this operation&rsquo;s OID certificate.
-      The compliance question is whether each product is covered by documented upstream supplier certification in the OSP.
-      Ref: 7 CFR &sect;&nbsp;205.201 (OSP requirements) &bull; SOE Rule (eff. March&nbsp;19,&nbsp;2024)
+      {% if report.get('cert_retailer') %}
+        Caution items below indicate products not found on this operation&rsquo;s OID certificate.
+        Verify whether each product is a pre-certified item being resold (retail exemption &mdash; no cert required)
+        or the operation&rsquo;s own product that should appear on the cert and in the OSP.
+        Ref: 7 CFR &sect;&nbsp;205.101(a)(2) (retail exemption) &bull; &sect;&nbsp;205.201 (OSP requirements) &bull; SOE Rule (eff. March&nbsp;19,&nbsp;2024)
+      {% else %}
+        Flagged items below indicate products not found on this operation&rsquo;s OID certificate.
+        The compliance question is whether each product is covered by documented upstream supplier certification in the OSP.
+        Ref: 7 CFR &sect;&nbsp;205.201 (OSP requirements) &bull; SOE Rule (eff. March&nbsp;19,&nbsp;2024)
+      {% endif %}
     </span>
   </div>
   {% endif %}
@@ -2138,8 +2215,21 @@ REPORT_PARTIAL = """
       <span class="badge">{{ report.caution | length }}</span>
     </div>
 
+    {# Retailer exemption notice #}
+    {% if report.get('cert_retailer') %}
+    <div style="margin-bottom:10px;padding:10px 14px;border-radius:12px;background:#F5F3FF;border:1px solid rgba(111,94,247,.2);font-size:.76rem;line-height:1.55;color:var(--text)">
+      <strong style="color:var(--primary)">&#9432; Retail Exemption Review</strong> &mdash;
+      Items listed as caution rather than non-compliance because this operation holds a Retailer-type HANDLING certificate.
+      Products not on this operation&rsquo;s OID cert may be pre-certified resale items covered by the retail exemption
+      (7 CFR &sect;&nbsp;205.101(a)(2)) rather than non-compliant claims.
+      <strong>Certifier must determine:</strong> Is this a resold pre-certified product (exempt) or the operation&rsquo;s
+      own organic product that should appear in the OSP?
+      <span style="display:block;margin-top:4px;font-size:.7rem;color:var(--muted)">Ref: 7 CFR &sect;&nbsp;205.101(a)(2) (retail exemption) &bull; &sect;&nbsp;205.201 (OSP) &bull; SOE Rule 88 FR 2799 (eff. March 19, 2024)</span>
+    </div>
+    {% endif %}
+
     {# General cert notice (when ALL cert products are generic category terms) #}
-    {% if report.get('cert_general') %}
+    {% if report.get('cert_general') and not report.get('cert_retailer') %}
     <div style="margin-bottom:10px;padding:10px 14px;border-radius:12px;background:#FFF8E1;border:1px solid #FDE68A;font-size:.76rem;line-height:1.55;color:var(--text)">
       <strong style="color:#D97706">&#128220; General-Terms Certificate</strong> &mdash;
       This operation&rsquo;s OID certificate lists only general commodity terms (e.g. &ldquo;Eggs&rdquo;, &ldquo;Wine&rdquo;).
@@ -2151,7 +2241,10 @@ REPORT_PARTIAL = """
     {% endif %}
 
     <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;line-height:1.55">
-      {% if report.get('cert_general') %}
+      {% if report.get('cert_retailer') %}
+        Products not found on this operation&rsquo;s OID certificate. Certifier review required to determine
+        retail exemption (pre-certified resale) vs. own-product claims that must appear on the cert/OSP.<br>
+      {% elif report.get('cert_general') %}
         Products on the website that cannot be verified against the OID certificate because the cert lists only general category terms.
         Also includes close name variations requiring certifier review.<br>
       {% else %}
@@ -2164,7 +2257,9 @@ REPORT_PARTIAL = """
       {% for item in report.caution | sort(attribute='title') %}
         <li class="caution-item">
           <span class="caution-icon">&#126;</span>
-          {% if item.get('_reason') == 'general_cert' %}
+          {% if item.get('_reason') == 'retailer_exemption_review' %}
+            <span style="font-size:.62rem;padding:1px 6px;border-radius:20px;background:#F5F3FF;color:#6F5EF7;border:1px solid rgba(111,94,247,.3);margin-right:5px;font-weight:700">RETAILER REVIEW</span>
+          {% elif item.get('_reason') == 'general_cert' %}
             <span style="font-size:.62rem;padding:1px 6px;border-radius:20px;background:#FFF8E1;color:#A16207;border:1px solid #FDE68A;margin-right:5px;font-weight:700">GENERAL CERT</span>
           {% endif %}
           {% if item.get('source') == 'image_alt' %}
