@@ -742,7 +742,10 @@ def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: 
 def _scheduler_loop():
     """Poll every 60s for scheduled checks that are due, fire them as threads."""
     time.sleep(30)  # brief startup delay
+    print('[SCHED] Loop started.')
+    iteration = 0
     while True:
+        iteration += 1
         if DATABASE_URL:
             try:
                 with db_conn() as conn:
@@ -755,6 +758,15 @@ def _scheduler_loop():
                                ORDER BY scheduled_at LIMIT 5"""
                         )
                         rows = cur.fetchall()
+                if rows:
+                    print(f'[SCHED] tick={iteration} found {len(rows)} due job(s)')
+                elif iteration % 10 == 0:
+                    # Heartbeat every ~10 minutes so logs show the loop is alive
+                    with db_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT COUNT(*) FROM scheduled_checks WHERE status='scheduled'")
+                            pending = cur.fetchone()[0]
+                    print(f'[SCHED] heartbeat tick={iteration} pending_scheduled={pending}')
                 for row in rows:
                     check_id, user_email, operation, website, report_format = row
                     # Atomic claim — prevents double-fire on restart
@@ -5498,6 +5510,42 @@ def admin_test_email():
              f'<p>Key configured: {"Yes" if RESEND_API_KEY else "No"}</p>'
              f'<p>Check healersfind@gmail.com for test message.</p>']
     return '\n'.join(lines)
+
+
+@app.route('/admin/scheduler-status')
+def admin_scheduler_status():
+    if get_logged_in_email() != ADMIN_EMAIL:
+        return 'Unauthorized', 403
+    rows = []
+    error = None
+    if DATABASE_URL:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, user_email, status, scheduled_at, operation_name, website_url, job_id
+                        FROM scheduled_checks
+                        ORDER BY scheduled_at DESC LIMIT 30
+                    """)
+                    rows = cur.fetchall()
+        except Exception as e:
+            error = str(e)
+    thread_alive = _scheduler_thread.is_alive()
+    html = ['<html><body style="font-family:monospace;padding:20px">',
+            f'<h2>Scheduler Diagnostics</h2>',
+            f'<p><b>Thread alive:</b> {thread_alive}</p>',
+            f'<p><b>DATABASE_URL set:</b> {"Yes" if DATABASE_URL else "No"}</p>']
+    if error:
+        html.append(f'<p style="color:red"><b>DB error:</b> {error}</p>')
+    html.append(f'<p><b>scheduled_checks rows (last 30):</b></p>')
+    html.append('<table border="1" cellpadding="4" style="border-collapse:collapse">')
+    html.append('<tr><th>id</th><th>user_email</th><th>status</th><th>scheduled_at</th>'
+                '<th>operation</th><th>website</th><th>job_id</th></tr>')
+    for r in rows:
+        html.append('<tr>' + ''.join(f'<td>{v}</td>' for v in r) + '</tr>')
+    html.append('</table>')
+    html.append('</body></html>')
+    return '\n'.join(html)
 
 
 # ---------------------------------------------------------------------------
