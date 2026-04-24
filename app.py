@@ -5834,6 +5834,13 @@ def schedule_page_html(user_email: str) -> str:
     next_avail_iso_js = json.dumps(
         next_slot.strftime('%Y-%m-%dT%H:%M:00Z') if next_slot else None
     )
+    if next_slot:
+        h = next_slot.hour % 12 or 12
+        ampm = 'AM' if next_slot.hour < 12 else 'PM'
+        mstr = f':{next_slot.minute:02d}' if next_slot.minute else ''
+        next_avail_static = f"{next_slot.strftime('%a %b ')}{ next_slot.day} at {h}{mstr} {ampm} UTC"
+    else:
+        next_avail_static = 'No slots available'
 
     if not user_email:
         return """
@@ -5899,7 +5906,7 @@ def schedule_page_html(user_email: str) -> str:
       <div>
         <div class="next-avail-label">Next Available Slot</div>
         <div style="font-size:.76rem;color:var(--muted);margin-top:2px" id="nextAvailAhead">&nbsp;</div>
-        <div class="next-avail-time" id="nextAvailTime">Loading&hellip;</div>
+        <div class="next-avail-time" id="nextAvailTime">{next_avail_static}</div>
       </div>
       <div class="next-avail-arrow">&#8594;</div>
     </div>
@@ -6023,14 +6030,17 @@ def schedule_page_html(user_email: str) -> str:
     }}
 
     function renderCalendar(year, month) {{
-      document.getElementById('calMonthLabel').textContent = MONTH_NAMES[month] + ' ' + year;
+      var lbl = document.getElementById('calMonthLabel');
       var grid = document.getElementById('calGrid');
+      var prevBtn = document.getElementById('calPrev');
+      if (!lbl || !grid) return;
+      lbl.textContent = MONTH_NAMES[month] + ' ' + year;
       grid.innerHTML = '';
       var todayLocal = utcIsoToLocalDate(new Date().toISOString());
       var firstDay = new Date(year, month, 1).getDay();
       var daysInMonth = new Date(year, month+1, 0).getDate();
       var nowM = new Date();
-      document.getElementById('calPrev').disabled = (year === nowM.getFullYear() && month === nowM.getMonth());
+      if (prevBtn) prevBtn.disabled = (year === nowM.getFullYear() && month === nowM.getMonth());
       for (var i = 0; i < firstDay; i++) {{
         var blank = document.createElement('div');
         blank.className = 'cal-day cal-blank';
@@ -6269,26 +6279,43 @@ def schedule_page_html(user_email: str) -> str:
     }}
 
     // ── Init ──────────────────────────────────────────────────────────────
-    calInit();
-    // Show next available immediately from server-injected value
-    var naEl = document.getElementById('nextAvailTime');
-    if (_nextAvailIso) {{
-      try {{ naEl.textContent = fmtSlotLocal(_nextAvailIso); }} catch(e) {{ naEl.textContent = _nextAvailIso; }}
-    }} else {{
-      naEl.textContent = 'No slots in next 30 days';
+    // Catch any JS errors and show them visibly for debugging
+    window.onerror = function(msg, src, line, col, err) {{
+      var el = document.getElementById('nextAvailTime');
+      if (el) el.textContent = 'JS Error: ' + msg + ' (line ' + line + ')';
+      return false;
+    }};
+
+    function _runSchedulerInit() {{
+      // Show next available immediately from server-injected value
+      var naEl = document.getElementById('nextAvailTime');
+      if (naEl) {{
+        if (_nextAvailIso) {{
+          try {{ naEl.textContent = fmtSlotLocal(_nextAvailIso); }} catch(e) {{ naEl.textContent = _nextAvailIso; }}
+        }} else {{
+          naEl.textContent = 'No slots in next 30 days';
+        }}
+      }}
+      calInit();
+      // Jump directly to the day containing the next available slot
+      if (_nextAvailIso) {{
+        clickNextAvail();
+      }} else {{
+        var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
+        var todayCell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === todayLocalDs; }});
+        if (todayCell) selectCalDay(todayLocalDs, todayCell);
+      }}
+      pollNextAvail();
+      setInterval(pollNextAvail, 5000);
+      loadMyChecks();
     }}
-    // Always jump directly to the day containing the next available slot so
-    // the user sees green bookable buttons immediately — not a full grey grid.
-    if (_nextAvailIso) {{
-      clickNextAvail();
+
+    // Run now if DOM is ready, otherwise wait for it
+    if (document.readyState === 'loading') {{
+      document.addEventListener('DOMContentLoaded', _runSchedulerInit);
     }} else {{
-      var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
-      var todayCell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === todayLocalDs; }});
-      if (todayCell) selectCalDay(todayLocalDs, todayCell);
+      _runSchedulerInit();
     }}
-    pollNextAvail();
-    setInterval(pollNextAvail, 5000);
-    loadMyChecks();
     </script>"""
 
 
