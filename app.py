@@ -173,6 +173,7 @@ def init_db():
             cur.execute("""
                 ALTER TABLE scheduled_checks ADD COLUMN IF NOT EXISTS report_format TEXT DEFAULT 'html'
             """)
+            cur.execute("ALTER TABLE scheduled_checks ADD COLUMN IF NOT EXISTS repeat_interval TEXT DEFAULT 'none'")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC'")
             cur.execute("ALTER TABLE job_history ADD COLUMN IF NOT EXISTS unlocked BOOLEAN DEFAULT FALSE")
             cur.execute("ALTER TABLE job_history ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMPTZ")
@@ -688,7 +689,7 @@ def _run_cert_verify(request_id: str, org_name: str, db_id: int):
     print(f'[CERT VERIFY] {org_name} → {result} (db_id={db_id})')
 
 
-def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: str, report_format: str = 'html'):
+def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: str, report_format: str = 'html', repeat_interval: str = 'none', scheduled_at_dt=None):
     """Wrapper: creates a job, runs it, saves result to DB, sends email."""
     job_id = uuid.uuid4().hex[:8]
     with jobs_lock:
@@ -736,7 +737,36 @@ def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: 
             _send_report_email_md(user_email, operation, check_id, report)
         else:
             _send_report_email(user_email, operation, check_id, report)
-    print(f'[SCHED] check_id={check_id} status={status} op={operation} fmt={report_format}')
+    print(f'[SCHED] check_id={check_id} status={status} op={operation} fmt={report_format} repeat={repeat_interval}')
+    # Auto-reschedule recurring checks
+    if status == 'done' and repeat_interval in ('monthly', 'yearly') and scheduled_at_dt and DATABASE_URL:
+        import calendar as _cal
+        try:
+            base = scheduled_at_dt if scheduled_at_dt.tzinfo else scheduled_at_dt.replace(tzinfo=timezone.utc)
+            if repeat_interval == 'monthly':
+                m = base.month + 1
+                y = base.year + (m - 1) // 12
+                m = ((m - 1) % 12) + 1
+                max_d = _cal.monthrange(y, m)[1]
+                next_dt = base.replace(year=y, month=m, day=min(base.day, max_d))
+            else:
+                try:
+                    next_dt = base.replace(year=base.year + 1)
+                except ValueError:
+                    next_dt = base.replace(year=base.year + 1, day=28)
+            next_id = uuid.uuid4().hex[:12]
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO scheduled_checks
+                           (id, user_email, operation_name, website_url, scheduled_at, report_format, repeat_interval)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (next_id, user_email, operation, website, next_dt, report_format, repeat_interval)
+                    )
+                conn.commit()
+            print(f'[SCHED] recurring next_id={next_id} at={next_dt} interval={repeat_interval}')
+        except Exception as e:
+            print(f'[SCHED] recurring reschedule failed: {e}')
 
 
 def _scheduler_loop():
@@ -752,7 +782,9 @@ def _scheduler_loop():
                     with conn.cursor() as cur:
                         cur.execute(
                             """SELECT id, user_email, operation_name, website_url,
-                                      COALESCE(report_format, 'html')
+                                      COALESCE(report_format, 'html'),
+                                      COALESCE(repeat_interval, 'none'),
+                                      scheduled_at
                                FROM scheduled_checks
                                WHERE status = 'scheduled' AND scheduled_at <= NOW()
                                ORDER BY scheduled_at LIMIT 5"""
@@ -768,7 +800,7 @@ def _scheduler_loop():
                             pending = cur.fetchone()[0]
                     print(f'[SCHED] heartbeat tick={iteration} pending_scheduled={pending}')
                 for row in rows:
-                    check_id, user_email, operation, website, report_format = row
+                    check_id, user_email, operation, website, report_format, repeat_interval, scheduled_at_dt = row
                     # Atomic claim — prevents double-fire on restart
                     with db_conn() as conn:
                         with conn.cursor() as cur:
@@ -782,10 +814,10 @@ def _scheduler_loop():
                     if claimed:
                         threading.Thread(
                             target=_run_scheduled_job,
-                            args=(check_id, user_email, operation, website, report_format),
+                            args=(check_id, user_email, operation, website, report_format, repeat_interval, scheduled_at_dt),
                             daemon=True
                         ).start()
-                        print(f'[SCHED] Fired check_id={check_id} op={operation} fmt={report_format}')
+                        print(f'[SCHED] Fired check_id={check_id} op={operation} fmt={report_format} repeat={repeat_interval}')
             except Exception as e:
                 print(f'[SCHED] Loop error: {e}')
         time.sleep(60)
@@ -5915,7 +5947,15 @@ def schedule_page_html(user_email: str) -> str:
     <div class="card">
       <div class="cal-header">
         <button class="cal-nav-btn" id="calPrev" onclick="calNav(-1)">&#8592;</button>
-        <div class="cal-month-label" id="calMonthLabel"></div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <select id="calMonthSel" onchange="onCalSelectChange()" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)">
+            <option value="0">January</option><option value="1">February</option><option value="2">March</option>
+            <option value="3">April</option><option value="4">May</option><option value="5">June</option>
+            <option value="6">July</option><option value="7">August</option><option value="8">September</option>
+            <option value="9">October</option><option value="10">November</option><option value="11">December</option>
+          </select>
+          <select id="calYearSel" onchange="onCalSelectChange()" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)"></select>
+        </div>
         <button class="cal-nav-btn" id="calNext" onclick="calNav(1)">&#8594;</button>
       </div>
       <div class="cal-weekdays">
@@ -5951,6 +5991,20 @@ def schedule_page_html(user_email: str) -> str:
         <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
           <input type="radio" name="rptFmt" value="md"> Email + Markdown (.md)
         </label>
+      </div>
+      <div style="margin-bottom:18px">
+        <label style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:block;margin-bottom:8px">Repeat</label>
+        <div style="display:flex;gap:20px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+            <input type="radio" name="repeatInt" value="none" checked> One-time
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+            <input type="radio" name="repeatInt" value="monthly"> Monthly
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+            <input type="radio" name="repeatInt" value="yearly"> Yearly
+          </label>
+        </div>
       </div>
       <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" style="width:100%">Confirm Booking</button>
       <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 Checker used when your check runs &mdash; not at booking time</div>
@@ -6019,6 +6073,22 @@ def schedule_page_html(user_email: str) -> str:
       var now = new Date();
       _calYear = now.getFullYear();
       _calMonth = now.getMonth();
+      var yearSel = document.getElementById('calYearSel');
+      if (yearSel) {{
+        for (var y = _calYear; y <= _calYear + 5; y++) {{
+          var opt = document.createElement('option');
+          opt.value = y; opt.textContent = y;
+          yearSel.appendChild(opt);
+        }}
+      }}
+      renderCalendar(_calYear, _calMonth);
+    }}
+
+    function onCalSelectChange() {{
+      var mSel = document.getElementById('calMonthSel');
+      var ySel = document.getElementById('calYearSel');
+      if (mSel) _calMonth = parseInt(mSel.value);
+      if (ySel) _calYear = parseInt(ySel.value);
       renderCalendar(_calYear, _calMonth);
     }}
 
@@ -6030,11 +6100,13 @@ def schedule_page_html(user_email: str) -> str:
     }}
 
     function renderCalendar(year, month) {{
-      var lbl = document.getElementById('calMonthLabel');
       var grid = document.getElementById('calGrid');
       var prevBtn = document.getElementById('calPrev');
-      if (!lbl || !grid) return;
-      lbl.textContent = MONTH_NAMES[month] + ' ' + year;
+      if (!grid) return;
+      var mSel = document.getElementById('calMonthSel');
+      var ySel = document.getElementById('calYearSel');
+      if (mSel) mSel.value = month;
+      if (ySel) ySel.value = year;
       grid.innerHTML = '';
       var todayLocal = utcIsoToLocalDate(new Date().toISOString());
       var firstDay = new Date(year, month, 1).getDay();
@@ -6216,9 +6288,13 @@ def schedule_page_html(user_email: str) -> str:
       btn.disabled = true; btn.textContent = 'Booking\u2026';
       try {{
         var fmt = document.querySelector('input[name="rptFmt"]:checked');
+        var repeatEl = document.querySelector('input[name="repeatInt"]:checked');
+        var repeatInterval = repeatEl ? repeatEl.value : 'none';
         var res = await fetch('/api/schedule-check', {{
           method: 'POST', headers: {{'Content-Type': 'application/json'}},
-          body: JSON.stringify({{operation: op, website: url, scheduled_at: _selectedSlot, report_format: fmt ? fmt.value : 'html'}})
+          body: JSON.stringify({{operation: op, website: url, scheduled_at: _selectedSlot,
+                                 report_format: fmt ? fmt.value : 'html',
+                                 repeat_interval: repeatInterval}})
         }});
         var data = await res.json();
         if (data.ok) {{
@@ -6226,6 +6302,8 @@ def schedule_page_html(user_email: str) -> str:
           document.getElementById('bookingCard').style.display = 'none';
           document.getElementById('schedOp').value = '';
           document.getElementById('schedUrl').value = '';
+          var noneRadio = document.querySelector('input[name="repeatInt"][value="none"]');
+          if (noneRadio) noneRadio.checked = true;
           btn.textContent = 'Booked!'; btn.style.background = 'var(--green)';
           setTimeout(function() {{ btn.textContent = 'Confirm Booking'; btn.style.background = ''; btn.disabled = false; }}, 2500);
           if (_selectedCalDay) loadSlots(_selectedCalDay);
@@ -6255,8 +6333,12 @@ def schedule_page_html(user_email: str) -> str:
           var actions = '';
           if (c.status === 'scheduled') actions = '<button class="sched-cancel-btn" onclick="cancelCheck(\'' + c.id + '\')">Cancel</button>';
           else if (c.status === 'done') actions = '<a class="sched-view-btn" href="/scheduled-report/' + c.id + '">View</a>';
+          var repeatBadge = '';
+          if (c.repeat_interval && c.repeat_interval !== 'none') {{
+            repeatBadge = '<span style="font-size:.7rem;font-weight:700;background:var(--lavender);color:var(--primary-dark);border-radius:6px;padding:2px 7px;margin-left:6px;text-transform:capitalize">↻ ' + c.repeat_interval + '</span>';
+          }}
           html += '<div class="sched-list-item"><div class="sched-item-info">' +
-            '<div class="sched-item-op">' + escHtml(c.operation_name) + '</div>' +
+            '<div class="sched-item-op">' + escHtml(c.operation_name) + repeatBadge + '</div>' +
             '<div class="sched-item-when">' + fmtSlotLocal(c.scheduled_at) + '</div></div>' +
             '<span class="sched-item-badge badge-' + c.status + '">' + c.status + '</span>' + actions + '</div>';
         }});
@@ -6345,13 +6427,16 @@ def api_schedule_check():
         return jsonify({'error': 'Sign in required'}), 401
     if not is_admin(email) and get_user_credits(email) < 1:
         return jsonify({'error': 'No credits remaining. Purchase credits to schedule checks.'}), 402
-    data          = request.get_json(force=True) or {}
-    operation     = data.get('operation', '').strip()
-    website       = data.get('website', '').strip()
-    scheduled_at  = data.get('scheduled_at', '').strip()
-    report_format = data.get('report_format', 'html').strip()
+    data             = request.get_json(force=True) or {}
+    operation        = data.get('operation', '').strip()
+    website          = data.get('website', '').strip()
+    scheduled_at     = data.get('scheduled_at', '').strip()
+    report_format    = data.get('report_format', 'html').strip()
+    repeat_interval  = data.get('repeat_interval', 'none').strip()
     if report_format not in ('html', 'md'):
         report_format = 'html'
+    if repeat_interval not in ('none', 'monthly', 'yearly'):
+        repeat_interval = 'none'
     if not operation or not website or not scheduled_at:
         return jsonify({'error': 'operation, website, and scheduled_at are required'}), 400
     if not website.startswith('http'):
@@ -6371,9 +6456,9 @@ def api_schedule_check():
             with conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO scheduled_checks
-                       (id, user_email, operation_name, website_url, scheduled_at, report_format)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
-                    (check_id, email, operation, website, slot_dt, report_format)
+                       (id, user_email, operation_name, website_url, scheduled_at, report_format, repeat_interval)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (check_id, email, operation, website, slot_dt, report_format, repeat_interval)
                 )
             conn.commit()
     except psycopg2.IntegrityError:
@@ -6395,7 +6480,8 @@ def api_my_scheduled_checks():
         with db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT id, operation_name, website_url, scheduled_at, status, job_id
+                    """SELECT id, operation_name, website_url, scheduled_at, status, job_id,
+                              COALESCE(repeat_interval, 'none')
                        FROM scheduled_checks
                        WHERE user_email = %s AND status NOT IN ('cancelled')
                        ORDER BY scheduled_at DESC LIMIT 50""",
@@ -6405,7 +6491,7 @@ def api_my_scheduled_checks():
         checks = [
             {'id': r[0], 'operation_name': r[1], 'website_url': r[2],
              'scheduled_at': r[3].strftime('%Y-%m-%dT%H:%M:00Z'),
-             'status': r[4], 'job_id': r[5]}
+             'status': r[4], 'job_id': r[5], 'repeat_interval': r[6]}
             for r in rows
         ]
         return jsonify({'checks': checks})
