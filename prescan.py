@@ -141,7 +141,7 @@ def load_operations(xlsx_path: str) -> list[dict]:
     wb.close()
 
     headers   = list(all_rows[0])   # row 1: column names
-    data_rows = all_rows[3:]        # rows 1-2 are OID metadata, data starts row 4
+    data_rows = all_rows[1:]        # data starts immediately after header
 
     def col(row, name):
         try:
@@ -154,7 +154,7 @@ def load_operations(xlsx_path: str) -> list[dict]:
     ops = []
     for row in data_rows:
         status = col(row, COL_STATUS)
-        if "Certified" not in status:
+        if status != "Certified":
             continue
         url = col(row, COL_URL)
         if not url or not url.startswith("http"):
