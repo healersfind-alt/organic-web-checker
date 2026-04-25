@@ -2,8 +2,6 @@
 builder = "DOCKERFILE"
 
 [deploy]
-healthcheckPath = "/"
-healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 
 # ---------------------------------------------------------------------------
@@ -12,4 +10,9 @@ restartPolicyType = "on_failure"
 #   Start Command = python worker.py
 # Environment vars needed: DATABASE_PUBLIC_URL (or DATABASE_URL)
 # No PORT, no health check needed for the worker.
+#
+# NOTE: healthcheckPath was removed from this file because it applied to
+# ALL services using this repo (including the worker, which has no HTTP
+# server). Set the healthcheck on the web app service via the Railway
+# dashboard instead: Settings → Deploy → Healthcheck Path = /
 # ---------------------------------------------------------------------------
