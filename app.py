@@ -5896,28 +5896,20 @@ def schedule_page_html(user_email: str) -> str:
           <a href="/pricing" class="btn-primary" style="text-decoration:none;display:inline-block">View Pricing</a>
         </div>"""
 
-    ALL_TZ = [
-        'UTC',
-        'America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
-        'America/Anchorage','Pacific/Honolulu','America/Toronto','America/Vancouver',
-        'America/Phoenix','America/Sao_Paulo','America/Argentina/Buenos_Aires',
-        'America/Mexico_City','America/Bogota','America/Lima','America/Santiago',
-        'Europe/London','Europe/Paris','Europe/Berlin','Europe/Madrid','Europe/Rome',
-        'Europe/Amsterdam','Europe/Zurich','Europe/Warsaw','Europe/Prague',
-        'Europe/Athens','Europe/Helsinki','Europe/Stockholm','Europe/Oslo',
-        'Europe/Lisbon','Europe/Dublin','Europe/Bucharest','Europe/Istanbul',
-        'Europe/Moscow','Europe/Kiev','Europe/Minsk',
-        'Asia/Dubai','Asia/Kolkata','Asia/Dhaka','Asia/Karachi',
-        'Asia/Bangkok','Asia/Jakarta','Asia/Singapore','Asia/Shanghai',
-        'Asia/Hong_Kong','Asia/Seoul','Asia/Tokyo',
-        'Australia/Sydney','Australia/Melbourne','Australia/Brisbane',
-        'Australia/Adelaide','Australia/Perth','Pacific/Auckland',
-        'Pacific/Fiji','Pacific/Guam','Africa/Cairo','Africa/Nairobi',
-        'Africa/Lagos','Africa/Johannesburg',
+    US_TZ = [
+        ('America/New_York',   'Eastern Time (ET)'),
+        ('America/Chicago',    'Central Time (CT)'),
+        ('America/Denver',     'Mountain Time (MT)'),
+        ('America/Phoenix',    'Mountain Time – Arizona (no DST)'),
+        ('America/Los_Angeles','Pacific Time (PT)'),
+        ('America/Anchorage',  'Alaska Time (AKT)'),
+        ('Pacific/Honolulu',   'Hawaii Time (HST)'),
     ]
+    if saved_tz not in [tz for tz, _ in US_TZ]:
+        saved_tz = 'America/New_York'
     tz_opts = ''.join(
-        '<option value="' + tz + '"' + (' selected' if tz == saved_tz else '') + '>' + tz.replace('_', ' ') + '</option>'
-        for tz in ALL_TZ
+        '<option value="' + tz + '"' + (' selected' if tz == saved_tz else '') + '>' + label + '</option>'
+        for tz, label in US_TZ
     )
     saved_tz_js = json.dumps(saved_tz)
     return f"""
@@ -5943,25 +5935,11 @@ def schedule_page_html(user_email: str) -> str:
       <div class="next-avail-arrow">&#8594;</div>
     </div>
 
-    <!-- Calendar -->
-    <div class="card">
-      <div class="cal-header">
-        <button class="cal-nav-btn" id="calPrev" onclick="calNav(-1)">&#8592;</button>
-        <div style="display:flex;align-items:center;gap:6px">
-          <select id="calMonthSel" onchange="onCalSelectChange()" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)">
-            <option value="0">January</option><option value="1">February</option><option value="2">March</option>
-            <option value="3">April</option><option value="4">May</option><option value="5">June</option>
-            <option value="6">July</option><option value="7">August</option><option value="8">September</option>
-            <option value="9">October</option><option value="10">November</option><option value="11">December</option>
-          </select>
-          <select id="calYearSel" onchange="onCalSelectChange()" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text)"></select>
-        </div>
-        <button class="cal-nav-btn" id="calNext" onclick="calNav(1)">&#8594;</button>
-      </div>
-      <div class="cal-weekdays">
-        <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-      </div>
-      <div class="cal-grid" id="calGrid"></div>
+    <!-- Date picker -->
+    <div class="card" style="padding:18px 20px">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:10px">Select Date</div>
+      <input type="date" id="datePick" onchange="onDatePick(this.value)"
+             style="width:100%;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);font-size:1rem;color:var(--text);background:white;box-sizing:border-box">
     </div>
 
     <!-- Time slots (shown after day click) -->
@@ -6021,9 +5999,8 @@ def schedule_page_html(user_email: str) -> str:
     var SLOT_START_H = 8;
     var SLOT_END_H   = 21;
     var SLOT_MIN     = 10;
-    var _userTz      = {saved_tz_js};
+    var _userTz       = {saved_tz_js};
     var _selectedSlot = null;
-    var _calYear, _calMonth;
     var _nextAvailIso = {next_avail_iso_js};
     var _selectedCalDay = null;
 
@@ -6039,7 +6016,6 @@ def schedule_page_html(user_email: str) -> str:
         }})
         .catch(function(){{ if (statusEl) {{ statusEl.textContent = 'Save failed'; }} }});
       if (_nextAvailIso) document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
-      renderCalendar(_calYear, _calMonth);
       if (_selectedCalDay) loadSlots(_selectedCalDay);
     }}
 
@@ -6066,81 +6042,10 @@ def schedule_page_html(user_email: str) -> str:
       return d.toLocaleDateString([], {{weekday:'long',year:'numeric',month:'long',day:'numeric'}});
     }}
 
-    // ── Calendar ──────────────────────────────────────────────────────────
-    var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-    function calInit() {{
-      var now = new Date();
-      _calYear = now.getFullYear();
-      _calMonth = now.getMonth();
-      var yearSel = document.getElementById('calYearSel');
-      if (yearSel) {{
-        for (var y = _calYear; y <= _calYear + 5; y++) {{
-          var opt = document.createElement('option');
-          opt.value = y; opt.textContent = y;
-          yearSel.appendChild(opt);
-        }}
-      }}
-      renderCalendar(_calYear, _calMonth);
-    }}
-
-    function onCalSelectChange() {{
-      var mSel = document.getElementById('calMonthSel');
-      var ySel = document.getElementById('calYearSel');
-      if (mSel) _calMonth = parseInt(mSel.value);
-      if (ySel) _calYear = parseInt(ySel.value);
-      renderCalendar(_calYear, _calMonth);
-    }}
-
-    function calNav(dir) {{
-      _calMonth += dir;
-      if (_calMonth > 11) {{ _calMonth = 0; _calYear++; }}
-      if (_calMonth < 0)  {{ _calMonth = 11; _calYear--; }}
-      renderCalendar(_calYear, _calMonth);
-    }}
-
-    function renderCalendar(year, month) {{
-      var grid = document.getElementById('calGrid');
-      var prevBtn = document.getElementById('calPrev');
-      if (!grid) return;
-      var mSel = document.getElementById('calMonthSel');
-      var ySel = document.getElementById('calYearSel');
-      if (mSel) mSel.value = month;
-      if (ySel) ySel.value = year;
-      grid.innerHTML = '';
-      var todayLocal = utcIsoToLocalDate(new Date().toISOString());
-      var firstDay = new Date(year, month, 1).getDay();
-      var daysInMonth = new Date(year, month+1, 0).getDate();
-      var nowM = new Date();
-      if (prevBtn) prevBtn.disabled = (year === nowM.getFullYear() && month === nowM.getMonth());
-      for (var i = 0; i < firstDay; i++) {{
-        var blank = document.createElement('div');
-        blank.className = 'cal-day cal-blank';
-        grid.appendChild(blank);
-      }}
-      for (var d = 1; d <= daysInMonth; d++) {{
-        var ds = year + '-' + String(month+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
-        var cell = document.createElement('div');
-        cell.className = 'cal-day';
-        cell.textContent = d;
-        cell.dataset.date = ds;
-        if (ds < todayLocal) {{
-          cell.classList.add('cal-day-past');
-        }} else {{
-          cell.classList.add('cal-day-avail');
-          if (ds === _selectedCalDay) cell.classList.add('cal-day-selected');
-          cell.onclick = (function(dateStr, el) {{
-            return function() {{ selectCalDay(dateStr, el); }};
-          }})(ds, cell);
-        }}
-        grid.appendChild(cell);
-      }}
-    }}
-
-    function selectCalDay(dateStr, cellEl) {{
+    // ── Date picker ───────────────────────────────────────────────────────
+    function onDatePick(dateStr) {{
+      if (!dateStr) return;
       _selectedCalDay = dateStr;
-      document.querySelectorAll('.cal-day').forEach(function(c) {{ c.classList.remove('cal-day-selected'); }});
-      if (cellEl) cellEl.classList.add('cal-day-selected');
       document.getElementById('slotsCard').style.display = '';
       document.getElementById('slotsDateLabel').textContent = localDateLabel(dateStr);
       loadSlots(dateStr);
@@ -6262,12 +6167,9 @@ def schedule_page_html(user_email: str) -> str:
     function clickNextAvail() {{
       if (!_nextAvailIso) return;
       var localDs = utcIsoToLocalDate(_nextAvailIso);
-      var parts = localDs.split('-');
-      _calYear = parseInt(parts[0]); _calMonth = parseInt(parts[1]) - 1;
-      renderCalendar(_calYear, _calMonth);
-      var cell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === localDs; }});
-      selectCalDay(localDs, cell || null);
-      // After slots load, auto-select the specific slot and show booking card
+      var dateInput = document.getElementById('datePick');
+      if (dateInput) dateInput.value = localDs;
+      onDatePick(localDs);
       setTimeout(function() {{
         var btn = document.querySelector('.slot-btn[data-iso="' + _nextAvailIso + '"]');
         if (btn && !btn.disabled) {{
@@ -6369,7 +6271,6 @@ def schedule_page_html(user_email: str) -> str:
     }};
 
     function _runSchedulerInit() {{
-      // Show next available immediately from server-injected value
       var naEl = document.getElementById('nextAvailTime');
       if (naEl) {{
         if (_nextAvailIso) {{
@@ -6378,14 +6279,16 @@ def schedule_page_html(user_email: str) -> str:
           naEl.textContent = 'No slots in next 30 days';
         }}
       }}
-      calInit();
-      // Jump directly to the day containing the next available slot
-      if (_nextAvailIso) {{
-        clickNextAvail();
-      }} else {{
+      var dateInput = document.getElementById('datePick');
+      if (dateInput) {{
         var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
-        var todayCell = Array.from(document.querySelectorAll('.cal-day-avail')).find(function(c){{ return c.dataset.date === todayLocalDs; }});
-        if (todayCell) selectCalDay(todayLocalDs, todayCell);
+        dateInput.min = todayLocalDs;
+        if (_nextAvailIso) {{
+          clickNextAvail();
+        }} else {{
+          dateInput.value = todayLocalDs;
+          onDatePick(todayLocalDs);
+        }}
       }}
       pollNextAvail();
       setInterval(pollNextAvail, 5000);

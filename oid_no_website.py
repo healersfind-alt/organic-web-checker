@@ -44,11 +44,7 @@ import requests
 # Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_XLSX = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "OID.OperationSearchResults.2026.4.16.5_34 PM.xlsx",
-)
+DEFAULT_XLSX = "/mnt/c/Users/toit_/OneDrive/OID.OperationSearchResults.2026.4.16.5_34 PM.xlsx"
 DEFAULT_OUT         = os.path.join(os.path.dirname(__file__), "oid_no_website.csv")
 DEFAULT_SEARCHED    = os.path.join(os.path.dirname(__file__), "oid_no_website_searched.csv")
 SEARCH_DELAY        = 1.2   # seconds between DuckDuckGo requests
