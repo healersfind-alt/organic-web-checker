@@ -5867,10 +5867,16 @@ def schedule_page_html(user_email: str) -> str:
         next_slot.strftime('%Y-%m-%dT%H:%M:00Z') if next_slot else None
     )
     if next_slot:
-        h = next_slot.hour % 12 or 12
-        ampm = 'AM' if next_slot.hour < 12 else 'PM'
-        mstr = f':{next_slot.minute:02d}' if next_slot.minute else ''
-        next_avail_static = f"{next_slot.strftime('%a %b ')}{ next_slot.day} at {h}{mstr} {ampm} UTC"
+        from zoneinfo import ZoneInfo
+        try:
+            local_slot = next_slot.astimezone(ZoneInfo(saved_tz))
+        except Exception:
+            local_slot = next_slot
+        h = local_slot.hour % 12 or 12
+        ampm = 'AM' if local_slot.hour < 12 else 'PM'
+        mstr = f':{local_slot.minute:02d}' if local_slot.minute else ''
+        tz_abbr = local_slot.strftime('%Z') or 'ET'
+        next_avail_static = f"{local_slot.strftime('%a %b ')}{ local_slot.day} at {h}{mstr} {ampm} {tz_abbr}"
     else:
         next_avail_static = 'No slots available'
 
@@ -6023,9 +6029,11 @@ def schedule_page_html(user_email: str) -> str:
     function fmtSlotLocal(isoUtc) {{
       var d = new Date(isoUtc);
       try {{
-        return d.toLocaleString([], {{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:_userTz,timeZoneName:'short'}});
+        var datePart = d.toLocaleDateString('en-US', {{month:'numeric',day:'numeric',year:'numeric',timeZone:_userTz}});
+        var timePart = d.toLocaleTimeString('en-US', {{hour:'numeric',minute:'2-digit',timeZone:_userTz,timeZoneName:'short'}});
+        return datePart + ' ' + timePart;
       }} catch(e) {{
-        return d.toLocaleString([], {{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}});
+        return d.toLocaleString();
       }}
     }}
 
@@ -6271,6 +6279,10 @@ def schedule_page_html(user_email: str) -> str:
     }};
 
     function _runSchedulerInit() {{
+      // On first visit, persist the displayed timezone so future pages match
+      fetch('/api/user/timezone', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+            body:JSON.stringify({{timezone:_userTz}})}}).catch(function(){{}});
+
       var naEl = document.getElementById('nextAvailTime');
       if (naEl) {{
         if (_nextAvailIso) {{
