@@ -6073,41 +6073,29 @@ def schedule_page_html(user_email: str) -> str:
     else:
         next_avail_static = 'No slots available'
 
-    if not user_email:
-        return """
-        <div class="page-title">Schedule Checker</div>
-        <div class="page-subtitle">Book a specific time slot and receive your report by email when it&rsquo;s ready.</div>
-        <div class="card" style="text-align:center;padding:40px">
-          <div style="font-size:2.5rem;margin-bottom:16px">&#128197;</div>
-          <div style="font-size:1.05rem;font-weight:800;color:var(--primary);margin-bottom:8px">Sign in to schedule a check</div>
-          <div style="font-size:.85rem;color:var(--muted);margin-bottom:22px">A free account is required to book time slots and receive email reports.</div>
-          <button class="btn-primary" onclick="openAuthModal('signin')">Sign In &nbsp;/&nbsp; Create Account</button>
+    needs_login  = not user_email
+    needs_credit = user_email and not admin and credits < 1
+    show_banner  = needs_login or needs_credit
+    if needs_login:
+        banner_html = """
+        <div class="card" style="border-left:4px solid var(--primary);padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:0">
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:.95rem;font-weight:800;color:var(--text);margin-bottom:3px">Schedule your checker.</div>
+            <div style="font-size:.82rem;color:var(--muted)">You&rsquo;ll create an account and add a credit before this booking is activated.</div>
+          </div>
+          <button class="btn-primary" onclick="openAuthModal('signin')" style="white-space:nowrap">Sign In &nbsp;/&nbsp; Create Account</button>
         </div>"""
-
-    if not admin and credits < 1:
-        return """
-        <div class="page-title">Schedule Checker</div>
-        <div class="page-subtitle">Book a specific time slot and receive your report by email when it&rsquo;s ready.</div>
-        <div class="card" style="text-align:center;padding:40px">
-          <div style="font-size:2.5rem;margin-bottom:16px">&#128199;</div>
-          <div style="font-size:1.05rem;font-weight:800;color:var(--primary);margin-bottom:8px">No credits remaining</div>
-          <div style="font-size:.85rem;color:var(--muted);margin-bottom:22px">One credit is reserved when you book a slot. Credits never expire.</div>
-          <button class="btn-primary" onclick="buyOneCredit()" style="margin-bottom:10px">Buy 1 Credit &mdash; $25 &rarr;</button>
-          <div style="font-size:.75rem;color:var(--muted)">or <a href="/pricing" style="color:var(--primary)">view all pricing</a></div>
-        </div>
-        <script>
-        function buyOneCredit() {
-          fetch('/create-checkout-session', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({tier_index: 0})
-          }).then(r => r.json()).then(d => {
-            if (d.login_required) { openAuthModal('signin'); return; }
-            if (d.url) window.location = d.url;
-            else alert(d.error || 'Checkout failed.');
-          }).catch(() => alert('Network error. Please try again.'));
-        }
-        </script>"""
+    elif needs_credit:
+        banner_html = """
+        <div class="card" style="border-left:4px solid var(--primary);padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:0">
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:.95rem;font-weight:800;color:var(--text);margin-bottom:3px">Schedule your checker.</div>
+            <div style="font-size:.82rem;color:var(--muted)">You&rsquo;ll add a credit before this booking is activated. Credits never expire.</div>
+          </div>
+          <button class="btn-primary" onclick="buyOneCredit()" style="white-space:nowrap">Buy 1 Credit &mdash; $25 &rarr;</button>
+        </div>"""
+    else:
+        banner_html = ''
 
     US_TZ = [
         ('America/New_York',   'Eastern Time (ET)'),
@@ -6128,6 +6116,8 @@ def schedule_page_html(user_email: str) -> str:
     return f"""
     <div class="page-title">Schedule Checker</div>
     <div class="page-subtitle">Pick a date and time &mdash; your check runs automatically and the report arrives by email. 78 slots per day, first-come first-serve. Slots available daily 8&nbsp;am&nbsp;&ndash;&nbsp;9&nbsp;pm&nbsp;UTC.</div>
+
+    {banner_html}
 
     <!-- Timezone selector -->
     <div class="card" style="padding:14px 20px">
@@ -6169,7 +6159,7 @@ def schedule_page_html(user_email: str) -> str:
         <button class="btn-primary" id="qbConfirmBtn" onclick="confirmQuickBook()" style="flex:1">Confirm Booking</button>
         <button onclick="document.getElementById('qbPanel').style.display='none'" style="padding:10px 18px;border:1.5px solid var(--border);border-radius:12px;background:none;cursor:pointer;font-size:.85rem;color:var(--muted)">Cancel</button>
       </div>
-      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit used when your check runs &mdash; not at booking time</div>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit reserved at booking &mdash; refunded if you cancel</div>
     </div>
 
     <!-- Date picker -->
@@ -6222,7 +6212,7 @@ def schedule_page_html(user_email: str) -> str:
         </div>
       </div>
       <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" style="width:100%">Confirm Booking</button>
-      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit used when your check runs &mdash; not at booking time</div>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit reserved at booking &mdash; refunded if you cancel</div>
     </div>
 
     <!-- My scheduled checks -->
@@ -6453,6 +6443,12 @@ def schedule_page_html(user_email: str) -> str:
             document.getElementById('nextAvailLabel').textContent = 'Booking Confirmed';
           }}
           loadMyChecks(); pollNextAvail();
+        }} else if (res.status === 401) {{
+          btn.disabled = false; btn.textContent = 'Confirm Booking';
+          openAuthModal('signin');
+        }} else if (res.status === 402) {{
+          btn.disabled = false; btn.textContent = 'Confirm Booking';
+          errEl.innerHTML = 'You need 1 credit to book. <button onclick="buyOneCredit()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 12px;font-size:.8rem;cursor:pointer;margin-left:6px">Buy 1 Credit \u2014 $25</button>';
         }} else {{
           errEl.textContent = data.error || 'Booking failed. Try again.';
           btn.disabled = false; btn.textContent = 'Confirm Booking';
@@ -6494,6 +6490,13 @@ def schedule_page_html(user_email: str) -> str:
           setTimeout(function() {{ btn.textContent = 'Confirm Booking'; btn.style.background = ''; btn.disabled = false; }}, 2500);
           if (_selectedCalDay) loadSlots(_selectedCalDay);
           loadMyChecks(); pollNextAvail();
+        }} else if (res.status === 401) {{
+          btn.disabled = false; btn.textContent = 'Confirm Booking';
+          openAuthModal('signin');
+        }} else if (res.status === 402) {{
+          btn.disabled = false; btn.textContent = 'Confirm Booking';
+          var errCard = document.getElementById('bookingCard').querySelector('div[style*="color:var(--red"]');
+          buyOneCredit();
         }} else {{
           alert(data.error || 'Booking failed. Please try again.');
           btn.disabled = false; btn.textContent = 'Confirm Booking';
@@ -6508,6 +6511,7 @@ def schedule_page_html(user_email: str) -> str:
     async function loadMyChecks() {{
       try {{
         var res = await fetch('/api/my-scheduled-checks');
+        if (res.status === 401) {{ document.getElementById('myChecksList').innerHTML = ''; return; }}
         var data = await res.json();
         var el = document.getElementById('myChecksList');
         if (!data.checks || data.checks.length === 0) {{
@@ -6602,6 +6606,18 @@ def schedule_page_html(user_email: str) -> str:
       pollNextAvail();
       setInterval(pollNextAvail, 5000);
       loadMyChecks();
+    }}
+
+    // ── Buy-one-credit helper (used when booking requires a credit purchase) ──
+    function buyOneCredit() {{
+      fetch('/create-checkout-session', {{
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{tier_index: 0}})
+      }}).then(function(r) {{ return r.json(); }}).then(function(d) {{
+        if (d.login_required) {{ openAuthModal('signin'); return; }}
+        if (d.url) window.location = d.url;
+        else alert(d.error || 'Checkout failed.');
+      }}).catch(function() {{ alert('Network error. Please try again.'); }});
     }}
 
     // Run now if DOM is ready, otherwise wait for it
