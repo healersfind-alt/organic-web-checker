@@ -1991,27 +1991,31 @@ BASE_TEMPLATE = """<!DOCTYPE html>
     </div>
   </div>
   <div class="header-right">
-    <div id="navUserArea">
-      {% if user_email %}
-        <span class="nav-user-email">{{ user_email }}</span>
-        <button class="nav-signout" onclick="doLogout()">Sign Out</button>
-      {% endif %}
-    </div>
-    <a href="/#run-check" class="header-cta-btn">Run Checker</a>
-    <div class="header-icon-wrap">
-      <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
-        <img src="/static/icon-header.png" class="header-icon" alt="">
-      </button>
-      <div class="header-dropdown" id="hDd">
-        <a class="dropdown-item" href="/account">Account</a>
-        <a class="dropdown-item" href="/schedule">Schedule Checker</a>
-        <a class="dropdown-item" href="/history">Check History</a>
-        <a class="dropdown-item" href="/pricing">Pricing</a>
-        <a class="dropdown-item" href="/agents">Agents &amp; API</a>
-        <a class="dropdown-item" href="/settings">Settings</a>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="/#run-check" class="header-cta-btn">Run Checker</a>
+        <div class="header-icon-wrap">
+          <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
+            <img src="/static/icon-header.png" class="header-icon" alt="">
+          </button>
+          <div class="header-dropdown" id="hDd">
+            <a class="dropdown-item" href="/account">Account</a>
+            <a class="dropdown-item" href="/schedule">Schedule Checker</a>
+            <a class="dropdown-item" href="/history">Check History</a>
+            <a class="dropdown-item" href="/pricing">Pricing</a>
+            <a class="dropdown-item" href="/agents">Agents &amp; API</a>
+            <a class="dropdown-item" href="/settings">Settings</a>
+            <div id="ddSignOut" style="display:none;border-top:1px solid rgba(255,255,255,.1);margin-top:4px;padding-top:4px">
+              <button class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.7);font-size:.82rem;padding:8px 16px" onclick="doLogout()">Sign Out</button>
+            </div>
+          </div>
+        </div>
       </div>
+      <div id="navUserEmail" style="font-size:.72rem;font-weight:700;color:#fff;letter-spacing:.01em;{% if not user_email %}display:none{% endif %}">{% if user_email %}{{ user_email }}{% endif %}</div>
     </div>
+    <div id="navUserArea" style="display:none"></div>
   </div>
+  {% if user_email %}<script>var el=document.getElementById('ddSignOut');if(el)el.style.display='block';</script>{% endif %}
 </header>
 <main class="page-main">
   {{ body | safe }}
@@ -2094,18 +2098,20 @@ async function doLogout(){
   location.reload();
 }
 function updateAuthUI(email,credits){
-  const el=document.getElementById('navUserArea');
-  if(!el)return;
   const credBadge=document.getElementById('headerCredits');
   const credText=document.getElementById('headerCreditText');
+  const emailEl=document.getElementById('navUserEmail');
+  const signOutEl=document.getElementById('ddSignOut');
   if(email){
-    el.innerHTML='<span class="nav-user-email">'+email+'</span>&nbsp;<button class="nav-signout" onclick="doLogout()">Sign Out</button>';
+    if(emailEl){emailEl.textContent=email;emailEl.style.display='block';}
+    if(signOutEl)signOutEl.style.display='block';
     if(credBadge&&credText){
       credText.textContent=credits>=99999?'Admin — Unlimited':(credits+' Checker'+(credits!==1?'s':'')+' Available');
       credBadge.style.display='flex';
     }
   }else{
-    el.innerHTML='';
+    if(emailEl)emailEl.style.display='none';
+    if(signOutEl)signOutEl.style.display='none';
     if(credBadge)credBadge.style.display='none';
   }
 }
@@ -2771,26 +2777,29 @@ MAIN_HTML = """<!DOCTYPE html>
     </div>
   </div>
   <div class="header-right">
-    <div id="navUserArea">
-      {% if user_email %}
-        <span class="nav-user-email">{{ user_email }}</span>
-        <button class="nav-signout" onclick="doLogout()">Sign Out</button>
-      {% endif %}
-    </div>
-    <a href="#run-check" class="header-cta-btn">Run Checker</a>
-    <div class="header-icon-wrap">
-      <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
-        <img src="/static/icon-header.png" class="header-icon" alt="">
-      </button>
-      <div class="header-dropdown" id="hDd">
-        <a class="dropdown-item" href="/account">Account</a>
-        <a class="dropdown-item" href="/schedule">Schedule Checker</a>
-        <a class="dropdown-item" href="/history">Check History</a>
-        <a class="dropdown-item" href="/pricing">Pricing</a>
-        <a class="dropdown-item" href="/agents">Agents &amp; API</a>
-        <a class="dropdown-item" href="/settings">Settings</a>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#run-check" class="header-cta-btn">Run Checker</a>
+        <div class="header-icon-wrap">
+          <button class="header-icon-btn" id="iconBtn" onclick="toggleDd(event)">
+            <img src="/static/icon-header.png" class="header-icon" alt="">
+          </button>
+          <div class="header-dropdown" id="hDd">
+            <a class="dropdown-item" href="/account">Account</a>
+            <a class="dropdown-item" href="/schedule">Schedule Checker</a>
+            <a class="dropdown-item" href="/history">Check History</a>
+            <a class="dropdown-item" href="/pricing">Pricing</a>
+            <a class="dropdown-item" href="/agents">Agents &amp; API</a>
+            <a class="dropdown-item" href="/settings">Settings</a>
+            <div id="ddSignOut" style="display:none;border-top:1px solid rgba(255,255,255,.1);margin-top:4px;padding-top:4px">
+              <button class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.7);font-size:.82rem;padding:8px 16px" onclick="doLogout()">Sign Out</button>
+            </div>
+          </div>
+        </div>
       </div>
+      <div id="navUserEmail" style="font-size:.72rem;font-weight:700;color:#fff;letter-spacing:.01em;display:none"></div>
     </div>
+    <div id="navUserArea" style="display:none"></div>
   </div>
 </header>
 
@@ -3344,18 +3353,20 @@ async function doLogout(){
   location.reload();
 }
 function updateAuthUI(email,credits){
-  const el=document.getElementById('navUserArea');
-  if(!el)return;
   const credBadge=document.getElementById('headerCredits');
   const credText=document.getElementById('headerCreditText');
+  const emailEl=document.getElementById('navUserEmail');
+  const signOutEl=document.getElementById('ddSignOut');
   if(email){
-    el.innerHTML='<span class="nav-user-email">'+email+'</span>&nbsp;<button class="nav-signout" onclick="doLogout()">Sign Out</button>';
+    if(emailEl){emailEl.textContent=email;emailEl.style.display='block';}
+    if(signOutEl)signOutEl.style.display='block';
     if(credBadge&&credText){
       credText.textContent=credits>=99999?'Admin — Unlimited':(credits+' Checker'+(credits!==1?'s':'')+' Available');
       credBadge.style.display='flex';
     }
   }else{
-    el.innerHTML='';
+    if(emailEl)emailEl.style.display='none';
+    if(signOutEl)signOutEl.style.display='none';
     if(credBadge)credBadge.style.display='none';
   }
 }
@@ -4735,53 +4746,23 @@ def api_docs():
 # ---------------------------------------------------------------------------
 
 def _send_reset_email(to_email: str, token: str) -> bool:
-    """Send password-reset email. Returns True on success. If SMTP is not
-    configured, prints the link to logs and returns False so the caller can
-    surface the link directly in the response."""
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-
+    """Send password-reset email via Resend. Returns True on success."""
     reset_url = f"{APP_BASE_URL}/reset-password?token={token}"
-
-    if not SMTP_USER or not SMTP_PASS:
-        print(f'[RESET LINK — email not configured] {to_email}: {reset_url}')
-        return False
-
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = 'Reset your Organic Web Checker password'
-        msg['From']    = f'Organic Web Checker <{FROM_EMAIL}>'
-        msg['To']      = to_email
-
-        plain = (
-            f"Hi,\n\nYou requested a password reset for your Organic Web Checker account.\n\n"
-            f"Reset link (valid 1 hour):\n{reset_url}\n\n"
-            f"If you didn't request this, ignore this email.\n\n— Organic Web Checker"
-        )
-        html = f"""<html><body style="font-family:Inter,sans-serif;color:#1F2937;max-width:480px;margin:0 auto;padding:32px 20px">
+    html_body = f"""<html><body style="font-family:Inter,sans-serif;color:#1F2937;max-width:480px;margin:0 auto;padding:32px 20px">
 <img src="{APP_BASE_URL}/static/icon.png" width="60" alt="" style="margin-bottom:20px;border-radius:12px">
 <h2 style="color:#6F5EF7;font-size:1.2rem;margin-bottom:8px">Password Reset</h2>
 <p style="color:#6B7280;font-size:.9rem;line-height:1.6;margin-bottom:24px">
   You requested a password reset for your Organic Web Checker account.
-  Click the button below — the link expires in 1 hour.
+  Click the button below &mdash; the link expires in 1 hour.
 </p>
 <a href="{reset_url}" style="display:inline-block;background:#6F5EF7;color:#fff;text-decoration:none;padding:13px 28px;border-radius:14px;font-weight:700;font-size:.9rem;box-shadow:0 4px 14px rgba(111,94,247,.25)">Reset Password</a>
 <p style="color:#9CA3AF;font-size:.75rem;margin-top:28px">If you didn't request this, you can safely ignore this email.</p>
 </body></html>"""
-
-        msg.attach(MIMEText(plain, 'plain'))
-        msg.attach(MIMEText(html,  'html'))
-
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.login(SMTP_USER, SMTP_PASS)
-            smtp.sendmail(FROM_EMAIL, to_email, msg.as_string())
-        return True
-    except Exception as exc:
-        print(f'[WARN] send_reset_email failed: {exc}')
+    err = _resend_send(to_email, 'Reset your Organic Web Checker password', html_body, from_addr=HELLO_FROM)
+    if err:
+        print(f'[WARN] _send_reset_email Resend error: {err}')
         return False
+    return True
 
 
 @app.route('/forgot-password')
@@ -4881,7 +4862,11 @@ def api_forgot_password():
         print(f'[WARN] api_forgot_password DB error: {exc}')
         return jsonify(generic_ok)
 
-    sent = _send_reset_email(email, token)
+    try:
+        sent = _send_reset_email(email, token)
+    except Exception as exc:
+        print(f'[WARN] _send_reset_email raised: {exc}')
+        sent = False
     if not sent:
         # SMTP not configured — surface the link directly (useful in dev / when
         # email is not yet set up, so the admin can copy-paste and send manually)
