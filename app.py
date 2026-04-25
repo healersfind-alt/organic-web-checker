@@ -150,7 +150,7 @@ def init_db():
             cur.execute("DROP INDEX IF EXISTS uq_scheduled_active_slot")
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_scheduled_active_slot
-                ON scheduled_checks (user_email, scheduled_at)
+                ON scheduled_checks (scheduled_at)
                 WHERE status NOT IN ('cancelled')
             """)
             cur.execute("""
@@ -402,6 +402,42 @@ def deduct_user_credit(email):
             conn.commit()
     except Exception:
         pass
+
+
+def refund_user_credit(email):
+    """Return one credit to a user (e.g. on booking cancellation)."""
+    if is_admin(email) or not DATABASE_URL:
+        return
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute('UPDATE users SET credits = credits + 1 WHERE email = %s', (email.lower(),))
+            conn.commit()
+    except Exception as exc:
+        print(f'[CREDITS] refund_user_credit({email}): {exc}')
+
+
+def _merge_anonymous_credits(email: str, token: str) -> int:
+    """Transfer credits from an anonymous session token into the user account.
+    Returns the number of credits merged (0 if none)."""
+    if not token or not DATABASE_URL:
+        return 0
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT credits_remaining FROM credit_accounts WHERE token = %s', (token,))
+                row = cur.fetchone()
+                if not row or row[0] <= 0:
+                    return 0
+                n = row[0]
+                cur.execute('UPDATE users SET credits = credits + %s WHERE email = %s', (n, email.lower()))
+                cur.execute('UPDATE credit_accounts SET credits_remaining = 0 WHERE token = %s', (token,))
+            conn.commit()
+        print(f'[MERGE] token={token[:8]}… → {email}: +{n} credits')
+        return n
+    except Exception as exc:
+        print(f'[MERGE] failed for {email}: {exc}')
+        return 0
 
 
 def _mark_job_unlocked(job_id: str):
@@ -720,9 +756,7 @@ def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: 
         job = dict(jobs.get(job_id, {}))
     report = job.get('report', {})
     status = 'done' if job.get('status') == 'done' and 'error' not in report else 'error'
-    # Deduct credit on success
-    if status == 'done':
-        deduct_user_credit(user_email)
+    # Credit was already deducted at booking time — nothing to deduct here.
     # Persist to DB
     if DATABASE_URL:
         try:
@@ -773,62 +807,73 @@ def _run_scheduled_job(check_id: str, user_email: str, operation: str, website: 
             print(f'[SCHED] recurring reschedule failed: {e}')
 
 
+def process_due_scheduled_checks(iteration: int = 0) -> int:
+    """Claim and fire any scheduled checks that are now due. Returns count fired.
+    Safe to call from multiple processes — atomic UPDATE prevents double-fire."""
+    if not DATABASE_URL:
+        return 0
+    fired = 0
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, user_email, operation_name, website_url,
+                              COALESCE(report_format, 'html'),
+                              COALESCE(repeat_interval, 'none'),
+                              scheduled_at
+                       FROM scheduled_checks
+                       WHERE status = 'scheduled' AND scheduled_at <= NOW()
+                       ORDER BY scheduled_at LIMIT 5"""
+                )
+                rows = cur.fetchall()
+        if rows:
+            print(f'[SCHED] tick={iteration} found {len(rows)} due job(s)')
+        elif iteration % 10 == 0:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM scheduled_checks WHERE status='scheduled'")
+                    pending = cur.fetchone()[0]
+            print(f'[SCHED] heartbeat tick={iteration} pending_scheduled={pending}')
+        for row in rows:
+            check_id, user_email, operation, website, report_format, repeat_interval, scheduled_at_dt = row
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE scheduled_checks SET status='running' WHERE id=%s AND status='scheduled'",
+                        (check_id,)
+                    )
+                    claimed = cur.rowcount
+                conn.commit()
+            if claimed:
+                threading.Thread(
+                    target=_run_scheduled_job,
+                    args=(check_id, user_email, operation, website, report_format, repeat_interval, scheduled_at_dt),
+                    daemon=True
+                ).start()
+                print(f'[SCHED] Fired check_id={check_id} op={operation} fmt={report_format} repeat={repeat_interval}')
+                fired += 1
+    except Exception as e:
+        print(f'[SCHED] process_due error: {e}')
+    return fired
+
+
 def _scheduler_loop():
-    """Poll every 60s for scheduled checks that are due, fire them as threads."""
-    time.sleep(30)  # brief startup delay
-    print('[SCHED] Loop started.')
+    """Daemon thread — runs inside the web process if INLINE_SCHEDULER=true."""
+    time.sleep(30)
+    print('[SCHED] Loop started (in-process).')
     iteration = 0
     while True:
         iteration += 1
-        if DATABASE_URL:
-            try:
-                with db_conn() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """SELECT id, user_email, operation_name, website_url,
-                                      COALESCE(report_format, 'html'),
-                                      COALESCE(repeat_interval, 'none'),
-                                      scheduled_at
-                               FROM scheduled_checks
-                               WHERE status = 'scheduled' AND scheduled_at <= NOW()
-                               ORDER BY scheduled_at LIMIT 5"""
-                        )
-                        rows = cur.fetchall()
-                if rows:
-                    print(f'[SCHED] tick={iteration} found {len(rows)} due job(s)')
-                elif iteration % 10 == 0:
-                    # Heartbeat every ~10 minutes so logs show the loop is alive
-                    with db_conn() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT COUNT(*) FROM scheduled_checks WHERE status='scheduled'")
-                            pending = cur.fetchone()[0]
-                    print(f'[SCHED] heartbeat tick={iteration} pending_scheduled={pending}')
-                for row in rows:
-                    check_id, user_email, operation, website, report_format, repeat_interval, scheduled_at_dt = row
-                    # Atomic claim — prevents double-fire on restart
-                    with db_conn() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                "UPDATE scheduled_checks SET status='running' "
-                                "WHERE id=%s AND status='scheduled'",
-                                (check_id,)
-                            )
-                            claimed = cur.rowcount
-                        conn.commit()
-                    if claimed:
-                        threading.Thread(
-                            target=_run_scheduled_job,
-                            args=(check_id, user_email, operation, website, report_format, repeat_interval, scheduled_at_dt),
-                            daemon=True
-                        ).start()
-                        print(f'[SCHED] Fired check_id={check_id} op={operation} fmt={report_format} repeat={repeat_interval}')
-            except Exception as e:
-                print(f'[SCHED] Loop error: {e}')
+        process_due_scheduled_checks(iteration)
         time.sleep(60)
 
 
-_scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
-_scheduler_thread.start()
+if os.environ.get('INLINE_SCHEDULER', '').lower() == 'true':
+    _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
+    _scheduler_thread.start()
+    print('[SCHED] Inline scheduler enabled via INLINE_SCHEDULER=true')
+else:
+    _scheduler_thread = None
 
 
 def _run_job(job_id: str, operation: str, website: str, use_cache: bool = False):
@@ -3561,6 +3606,9 @@ def pricing_page_html():
         const data = await res.json();
         if (data.url) {{
           window.location.href = data.url;
+        }} else if (data.login_required) {{
+          if (btn) {{ btn.textContent = 'Purchase'; btn.style.opacity = ''; btn.style.pointerEvents = ''; }}
+          openAuthModal('signin');
         }} else {{
           alert('Checkout error: ' + (data.error || 'Please try again.'));
           if (btn) {{ btn.textContent = 'Purchase'; btn.style.opacity = ''; btn.style.pointerEvents = ''; }}
@@ -4151,13 +4199,15 @@ def get_stats():
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'error': 'Sign in required to purchase credits.', 'login_required': True}), 401
     try:
         data = request.get_json(force=True) or {}
         tier_index = int(data.get('tier_index', -1))
         if tier_index < 0 or tier_index >= len(TIERS):
             return jsonify({'error': 'Invalid tier'}), 400
         tier  = TIERS[tier_index]
-        token = get_logged_in_email() or get_session_token()
         checkout = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -4173,7 +4223,7 @@ def create_checkout_session():
             }],
             mode='payment',
             allow_promotion_codes=True,
-            client_reference_id=token,
+            client_reference_id=email,
             metadata={'tier_name': tier['name'], 'credits': str(tier['count'])},
             success_url=APP_BASE_URL + '/success?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=APP_BASE_URL + '/pricing',
@@ -4208,6 +4258,8 @@ def stripe_webhook():
                 promo_code = pc.get('code')
             except Exception:
                 pass
+        table = 'users' if ref and '@' in ref else 'credit_accounts'
+        print(f'[STRIPE] checkout.session.completed ref={ref!r} credits={credits} tier={tier_name!r} table={table} session={stripe_session_id}')
         if ref and credits > 0 and DATABASE_URL:
             try:
                 with db_conn() as conn:
@@ -4221,7 +4273,7 @@ def stripe_webhook():
                                     credits = users.credits + EXCLUDED.credits
                             """, (ref.lower(), credits))
                         else:
-                            # anonymous session token purchase
+                            # anonymous session token purchase (legacy path — checkout now requires login)
                             cur.execute("""
                                 INSERT INTO credit_accounts (token, credits_remaining, total_purchased)
                                 VALUES (%s, %s, %s)
@@ -4235,8 +4287,9 @@ def stripe_webhook():
                             ON CONFLICT (stripe_session_id) DO NOTHING
                         """, (ref, stripe_session_id, tier_name, credits, amount_cents, promo_code))
                     conn.commit()
+                print(f'[STRIPE] DB write OK for ref={ref!r}')
             except Exception as e:
-                print(f'[WARN] Webhook DB write failed: {e}')
+                print(f'[STRIPE] DB write FAILED for ref={ref!r}: {e}')
     return '', 200
 
 
@@ -4982,6 +5035,11 @@ def register():
                 )
             conn.commit()
         session['user_email'] = email
+        token = session.get('token')
+        if token:
+            merged = _merge_anonymous_credits(email, token)
+            if merged:
+                print(f'[REGISTER] merged {merged} anonymous credits for {email}')
         credits = get_user_credits(email)
         _send_welcome_email(email)
         return jsonify({'ok': True, 'email': email, 'credits': credits})
@@ -5012,6 +5070,11 @@ def login():
         if not row or not check_password_hash(row[0], password):
             return jsonify({'ok': False, 'error': 'Invalid email or password.'}), 401
         session['user_email'] = email
+        token = session.get('token')
+        if token:
+            merged = _merge_anonymous_credits(email, token)
+            if merged:
+                print(f'[LOGIN] merged {merged} anonymous credits for {email}')
         credits = get_user_credits(email)
         return jsonify({'ok': True, 'email': email, 'credits': credits})
     except Exception as e:
@@ -5721,7 +5784,7 @@ def admin_scheduler_status():
                     rows = cur.fetchall()
         except Exception as e:
             error = str(e)
-    thread_alive = _scheduler_thread.is_alive()
+    thread_alive = _scheduler_thread.is_alive() if _scheduler_thread else 'n/a (external worker)'
     html = ['<html><body style="font-family:monospace;padding:20px">',
             f'<h2>Scheduler Diagnostics</h2>',
             f'<p><b>Thread alive:</b> {thread_alive}</p>',
@@ -6028,9 +6091,23 @@ def schedule_page_html(user_email: str) -> str:
         <div class="card" style="text-align:center;padding:40px">
           <div style="font-size:2.5rem;margin-bottom:16px">&#128199;</div>
           <div style="font-size:1.05rem;font-weight:800;color:var(--primary);margin-bottom:8px">No credits remaining</div>
-          <div style="font-size:.85rem;color:var(--muted);margin-bottom:22px">Purchase credits to schedule checks. Credits are deducted when your scheduled check runs.</div>
-          <a href="/pricing" class="btn-primary" style="text-decoration:none;display:inline-block">View Pricing</a>
-        </div>"""
+          <div style="font-size:.85rem;color:var(--muted);margin-bottom:22px">One credit is reserved when you book a slot. Credits never expire.</div>
+          <button class="btn-primary" onclick="buyOneCredit()" style="margin-bottom:10px">Buy 1 Credit &mdash; $25 &rarr;</button>
+          <div style="font-size:.75rem;color:var(--muted)">or <a href="/pricing" style="color:var(--primary)">view all pricing</a></div>
+        </div>
+        <script>
+        function buyOneCredit() {
+          fetch('/create-checkout-session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tier_index: 0})
+          }).then(r => r.json()).then(d => {
+            if (d.login_required) { openAuthModal('signin'); return; }
+            if (d.url) window.location = d.url;
+            else alert(d.error || 'Checkout failed.');
+          }).catch(() => alert('Network error. Please try again.'));
+        }
+        </script>"""
 
     US_TZ = [
         ('America/New_York',   'Eastern Time (ET)'),
@@ -6560,8 +6637,6 @@ def api_schedule_check():
     email = get_logged_in_email()
     if not email:
         return jsonify({'error': 'Sign in required'}), 401
-    if not is_admin(email) and get_user_credits(email) < 1:
-        return jsonify({'error': 'No credits remaining. Purchase credits to schedule checks.'}), 402
     data             = request.get_json(force=True) or {}
     operation        = data.get('operation', '').strip()
     website          = data.get('website', '').strip()
@@ -6583,19 +6658,34 @@ def api_schedule_check():
         return jsonify({'error': 'Invalid scheduled_at format. Use ISO 8601 UTC.'}), 400
     if slot_dt < datetime.now(timezone.utc) + timedelta(minutes=3):
         return jsonify({'error': 'Slot must be at least 3 minutes in the future.'}), 400
+    if slot_dt.second != 0:
+        return jsonify({'error': 'Slot seconds must be 0.'}), 400
+    if slot_dt.minute % 10 != 0:
+        return jsonify({'error': 'Slot must be on a 10-minute boundary (e.g. :00, :10, :20).'}), 400
+    if slot_dt.hour < 8 or slot_dt.hour > 20 or (slot_dt.hour == 20 and slot_dt.minute > 50):
+        return jsonify({'error': 'Slots are available 8:00–20:50 UTC only.'}), 400
     check_id = uuid.uuid4().hex[:12]
     if not DATABASE_URL:
         return jsonify({'error': 'Database not configured'}), 500
     try:
         with db_conn() as conn:
             with conn.cursor() as cur:
+                # Credit check + deduction inside the transaction so booking and payment are atomic.
+                if not is_admin(email):
+                    cur.execute('SELECT credits FROM users WHERE email = %s FOR UPDATE', (email.lower(),))
+                    row = cur.fetchone()
+                    if not row or row[0] < 1:
+                        return jsonify({'error': 'No credits remaining. Purchase credits to schedule checks.'}), 402
                 cur.execute(
                     """INSERT INTO scheduled_checks
                        (id, user_email, operation_name, website_url, scheduled_at, report_format, repeat_interval)
                        VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                     (check_id, email, operation, website, slot_dt, report_format, repeat_interval)
                 )
+                if not is_admin(email):
+                    cur.execute('UPDATE users SET credits = credits - 1 WHERE email = %s', (email.lower(),))
             conn.commit()
+        print(f'[CREDITS] deducted 1 at booking for {email} check_id={check_id} slot={slot_dt.isoformat()}')
     except psycopg2.IntegrityError:
         return jsonify({'error': 'That time slot is already booked. Please choose another.'}), 409
     except Exception as e:
@@ -6653,6 +6743,9 @@ def api_cancel_scheduled(check_id):
             conn.commit()
         if not updated:
             return jsonify({'error': 'Check not found or already running/done'}), 404
+        # Return the reserved credit to the user
+        refund_user_credit(email)
+        print(f'[CREDITS] refunded 1 for {email} cancel check_id={check_id}')
         return jsonify({'ok': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

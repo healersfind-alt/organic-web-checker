@@ -5,3 +5,11 @@ builder = "DOCKERFILE"
 healthcheckPath = "/"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
+
+# ---------------------------------------------------------------------------
+# Scheduler worker — separate process, same repo / same Docker image.
+# In Railway: add a second service pointing at this repo, set
+#   Start Command = python worker.py
+# Environment vars needed: DATABASE_PUBLIC_URL (or DATABASE_URL)
+# No PORT, no health check needed for the worker.
+# ---------------------------------------------------------------------------
