@@ -175,6 +175,10 @@ def init_db():
             """)
             cur.execute("ALTER TABLE scheduled_checks ADD COLUMN IF NOT EXISTS repeat_interval TEXT DEFAULT 'none'")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC'")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS sched_report_format TEXT DEFAULT 'html'")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS sched_repeat_interval TEXT DEFAULT 'none'")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_op_name TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_op_website TEXT DEFAULT ''")
             cur.execute("ALTER TABLE job_history ADD COLUMN IF NOT EXISTS unlocked BOOLEAN DEFAULT FALSE")
             cur.execute("ALTER TABLE job_history ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMPTZ")
         conn.commit()
@@ -3621,6 +3625,46 @@ ACCOUNT_BODY = """
       <button onclick="acctDoLogout()" style="background:none;border:1px solid var(--border);border-radius:10px;padding:8px 16px;color:var(--muted);font-size:.84rem;cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">Sign Out</button>
     </div>
 
+    <!-- Schedule Preferences -->
+    <div class="card" style="max-width:540px;margin:0 auto 22px" id="schedPrefCard">
+      <div style="font-size:.9rem;font-weight:800;color:var(--text);margin-bottom:4px">Schedule Preferences</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:18px">These settings are saved to your account and pre-fill the Schedule page automatically.</div>
+      <label style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Timezone</label>
+      <select id="prefTz" onchange="savePref('timezone', this.value)" style="width:100%;padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:.85rem;background:white;color:var(--text);margin-bottom:14px">
+        <option value="America/New_York">Eastern Time (ET)</option>
+        <option value="America/Chicago">Central Time (CT)</option>
+        <option value="America/Denver">Mountain Time (MT)</option>
+        <option value="America/Phoenix">Mountain Time – Arizona (no DST)</option>
+        <option value="America/Los_Angeles">Pacific Time (PT)</option>
+        <option value="America/Anchorage">Alaska Time (AKT)</option>
+        <option value="Pacific/Honolulu">Hawaii Time (HST)</option>
+      </select>
+      <label style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Report Format</label>
+      <div style="display:flex;gap:20px;margin:8px 0 14px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+          <input type="radio" name="prefFmt" value="html" onchange="savePref('report_format','html')"> Email (HTML)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+          <input type="radio" name="prefFmt" value="md" onchange="savePref('report_format','md')"> Email + Markdown (.md)
+        </label>
+      </div>
+      <div id="prefRepeatWrap" style="display:none">
+        <label style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Default Repeat</label>
+        <div style="display:flex;gap:20px;margin:8px 0 14px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+            <input type="radio" name="prefRepeat" value="none" onchange="savePref('repeat_interval','none')"> One-time
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+            <input type="radio" name="prefRepeat" value="monthly" onchange="savePref('repeat_interval','monthly')"> Monthly
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+            <input type="radio" name="prefRepeat" value="yearly" onchange="savePref('repeat_interval','yearly')"> Yearly
+          </label>
+        </div>
+      </div>
+      <div id="prefSaveStatus" style="font-size:.75rem;color:var(--muted)"></div>
+    </div>
+
     <div class="card" style="max-width:540px;margin:0 auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <div>
@@ -3724,7 +3768,32 @@ async function apiKeyRevoke(key_id){
   apiKeyLoadList();
 }
 
-// Extend acctInit to also load keys
+// ── Schedule Preferences ─────────────────────────────────────────────────────
+async function savePref(key, val){
+  const statusEl=document.getElementById('prefSaveStatus');
+  if(statusEl) statusEl.textContent='Saving...';
+  const body={};body[key]=val;
+  const res=await fetch('/api/user/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await res.json();
+  if(statusEl){statusEl.textContent=d.ok?'Saved ✓':'Save failed';setTimeout(()=>{statusEl.textContent='';},2000);}
+}
+async function loadSchedPrefs(credits,isAdmin){
+  const res=await fetch('/api/user/settings');
+  const d=await res.json();
+  if(!d.ok||!d.settings)return;
+  const s=d.settings;
+  const tzSel=document.getElementById('prefTz');
+  if(tzSel)tzSel.value=s.timezone||'America/New_York';
+  const fmtR=document.querySelector('input[name="prefFmt"][value="'+(s.report_format||'html')+'"]');
+  if(fmtR)fmtR.checked=true;
+  const repR=document.querySelector('input[name="prefRepeat"][value="'+(s.repeat_interval||'none')+'"]');
+  if(repR)repR.checked=true;
+  // Show repeat section if user has multiple credits
+  const repWrap=document.getElementById('prefRepeatWrap');
+  if(repWrap&&(credits>1||isAdmin))repWrap.style.display='';
+}
+
+// Extend acctInit to also load keys and schedule prefs
 const _origAcctInit=typeof acctInit==='function'?acctInit:null;
 async function acctInit(){
   const res=await fetch('/api/user');
@@ -3733,8 +3802,11 @@ async function acctInit(){
     document.getElementById('acctLoggedOut').style.display='none';
     document.getElementById('acctLoggedIn').style.display='';
     document.getElementById('acctEmail').textContent=d.email;
-    document.getElementById('acctCredits').textContent=d.is_admin?'Unlimited (Admin)':(d.credits+' credit'+(d.credits!==1?'s':''));
+    const credits=d.credits||0;
+    const isAdmin=!!d.is_admin;
+    document.getElementById('acctCredits').textContent=isAdmin?'Unlimited (Admin)':(credits+' credit'+(credits!==1?'s':''));
     apiKeyLoadList();
+    loadSchedPrefs(credits,isAdmin);
   }
 }
 acctInit();
@@ -4272,6 +4344,53 @@ def api_set_timezone():
         with db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("UPDATE users SET timezone = %s WHERE email = %s", (tz, email))
+            conn.commit()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    return jsonify({'ok': True})
+
+
+@app.route('/api/user/settings', methods=['GET', 'POST'])
+def api_user_settings():
+    email = get_logged_in_email()
+    if not email:
+        return jsonify({'ok': False, 'error': 'Not logged in'}), 401
+    if request.method == 'GET':
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT timezone, sched_report_format, sched_repeat_interval, last_op_name, last_op_website FROM users WHERE email = %s",
+                        (email,)
+                    )
+                    row = cur.fetchone()
+            if row:
+                return jsonify({'ok': True, 'settings': {
+                    'timezone': row[0] or 'America/New_York',
+                    'report_format': row[1] or 'html',
+                    'repeat_interval': row[2] or 'none',
+                    'last_op_name': row[3] or '',
+                    'last_op_website': row[4] or '',
+                }})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 500
+        return jsonify({'ok': True, 'settings': {'timezone': 'America/New_York', 'report_format': 'html',
+                                                  'repeat_interval': 'none', 'last_op_name': '', 'last_op_website': ''}})
+    # POST — save settings
+    data = request.get_json(force=True, silent=True) or {}
+    fields, vals = [], []
+    for col, key in [('timezone','timezone'),('sched_report_format','report_format'),
+                     ('sched_repeat_interval','repeat_interval'),
+                     ('last_op_name','last_op_name'),('last_op_website','last_op_website')]:
+        if key in data and isinstance(data[key], str):
+            fields.append(f"{col} = %s")
+            vals.append(data[key][:500])
+    if not fields:
+        return jsonify({'ok': False, 'error': 'Nothing to save'}), 400
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE users SET {', '.join(fields)} WHERE email = %s", vals + [email])
             conn.commit()
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -5848,16 +5967,27 @@ def schedule_page_html(user_email: str) -> str:
     credits = get_user_credits(user_email) if user_email else 0
     admin   = is_admin(user_email)
 
-    # Read saved timezone
-    saved_tz = 'UTC'
+    # Read saved user preferences
+    saved_tz             = 'UTC'
+    saved_report_format  = 'html'
+    saved_repeat_interval= 'none'
+    saved_last_op_name   = ''
+    saved_last_op_website= ''
     if user_email and DATABASE_URL:
         try:
             with db_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT timezone FROM users WHERE email = %s", (user_email,))
+                    cur.execute(
+                        "SELECT timezone, sched_report_format, sched_repeat_interval, last_op_name, last_op_website FROM users WHERE email = %s",
+                        (user_email,)
+                    )
                     row = cur.fetchone()
-                    if row and row[0]:
-                        saved_tz = row[0]
+                    if row:
+                        saved_tz              = row[0] or 'UTC'
+                        saved_report_format   = row[1] or 'html'
+                        saved_repeat_interval = row[2] or 'none'
+                        saved_last_op_name    = row[3] or ''
+                        saved_last_op_website = row[4] or ''
         except Exception:
             pass
 
@@ -5932,13 +6062,37 @@ def schedule_page_html(user_email: str) -> str:
     </div>
 
     <!-- Next Available -->
-    <div class="next-avail-box" id="nextAvailBox" onclick="clickNextAvail()">
+    <div class="next-avail-box" id="nextAvailBox" onclick="clickNextAvail()" style="cursor:pointer">
       <div>
-        <div class="next-avail-label">Next Available Slot</div>
+        <div class="next-avail-label" id="nextAvailLabel">Next Available Slot &mdash; click to book instantly</div>
         <div style="font-size:.76rem;color:var(--muted);margin-top:2px" id="nextAvailAhead">&nbsp;</div>
         <div class="next-avail-time" id="nextAvailTime">{next_avail_static}</div>
       </div>
       <div class="next-avail-arrow">&#8594;</div>
+    </div>
+
+    <!-- Quick-book panel (shown on Next Available click) -->
+    <div class="card" id="qbPanel" style="display:none;border:2px solid var(--primary)">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);margin-bottom:12px">Quick Book &mdash; Next Available</div>
+      <div id="qbSlotTime" style="background:var(--lavender);border-radius:10px;padding:8px 14px;font-size:.9rem;font-weight:700;color:var(--primary-dark);margin-bottom:16px;display:inline-block"></div>
+      <label>Operation Name</label>
+      <input type="text" id="qbOp" placeholder="e.g. Green Hills Farm" style="margin-bottom:12px">
+      <label>Website URL</label>
+      <input type="text" id="qbUrl" placeholder="https://example.com" style="margin-bottom:14px">
+      <div style="display:flex;gap:20px;margin-bottom:16px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+          <input type="radio" name="qbFmt" value="html" checked> Email (HTML)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
+          <input type="radio" name="qbFmt" value="md"> Email + Markdown
+        </label>
+      </div>
+      <div id="qbErr" style="font-size:.8rem;color:var(--red);margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn-primary" id="qbConfirmBtn" onclick="confirmQuickBook()" style="flex:1">Confirm Booking</button>
+        <button onclick="document.getElementById('qbPanel').style.display='none'" style="padding:10px 18px;border:1.5px solid var(--border);border-radius:12px;background:none;cursor:pointer;font-size:.85rem;color:var(--muted)">Cancel</button>
+      </div>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit used when your check runs &mdash; not at booking time</div>
     </div>
 
     <!-- Date picker -->
@@ -5970,17 +6124,17 @@ def schedule_page_html(user_email: str) -> str:
       <input type="text" id="schedUrl" placeholder="https://example.com" style="margin-bottom:18px">
       <div style="display:flex;gap:20px;margin-bottom:18px">
         <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
-          <input type="radio" name="rptFmt" value="html" checked> Email (HTML)
+          <input type="radio" name="rptFmt" value="html"> Email (HTML)
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
           <input type="radio" name="rptFmt" value="md"> Email + Markdown (.md)
         </label>
       </div>
-      <div style="margin-bottom:18px">
+      <div id="repeatSection" style="margin-bottom:18px;display:none">
         <label style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:block;margin-bottom:8px">Repeat</label>
         <div style="display:flex;gap:20px;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
-            <input type="radio" name="repeatInt" value="none" checked> One-time
+            <input type="radio" name="repeatInt" value="none"> One-time
           </label>
           <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">
             <input type="radio" name="repeatInt" value="monthly"> Monthly
@@ -5991,7 +6145,7 @@ def schedule_page_html(user_email: str) -> str:
         </div>
       </div>
       <button class="btn-primary" id="confirmBtn" onclick="confirmBooking()" style="width:100%">Confirm Booking</button>
-      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 Checker used when your check runs &mdash; not at booking time</div>
+      <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-top:10px">1 credit used when your check runs &mdash; not at booking time</div>
     </div>
 
     <!-- My scheduled checks -->
@@ -6002,26 +6156,36 @@ def schedule_page_html(user_email: str) -> str:
 
     <script>
     // ── Config ────────────────────────────────────────────────────────────
-    var SLOT_START_H = 8;
-    var SLOT_END_H   = 21;
-    var SLOT_MIN     = 10;
-    var _userTz       = {saved_tz_js};
-    var _selectedSlot = null;
-    var _nextAvailIso = {next_avail_iso_js};
-    var _selectedCalDay = null;
+    var SLOT_START_H      = 8;
+    var SLOT_END_H        = 21;
+    var SLOT_MIN          = 10;
+    var _userTz           = {saved_tz_js};
+    var _selectedSlot     = null;
+    var _nextAvailIso     = {next_avail_iso_js};
+    var _selectedCalDay   = null;
+    var _savedFmt         = {json.dumps(saved_report_format)};
+    var _savedRepeat      = {json.dumps(saved_repeat_interval)};
+    var _savedOpName      = {json.dumps(saved_last_op_name)};
+    var _savedOpWebsite   = {json.dumps(saved_last_op_website)};
+    var _canRepeat        = {json.dumps(credits > 1 or admin)};
 
     function onTzChange(tz) {{
       _userTz = tz;
       var statusEl = document.getElementById('tzSaveStatus');
       if (statusEl) statusEl.textContent = 'Saving...';
-      fetch('/api/user/timezone', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{timezone:tz}})}})
+      fetch('/api/user/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{timezone:tz}})}})
         .then(function(r){{ return r.json(); }})
         .then(function(d){{
           if (statusEl) statusEl.textContent = d.ok ? 'Saved \u2713' : 'Save failed';
-          setTimeout(function(){{ if (statusEl) statusEl.textContent = ''; }}, 2500);
+          setTimeout(function(){{ if (statusEl) statusEl.textContent = ''; }}, 2000);
         }})
-        .catch(function(){{ if (statusEl) {{ statusEl.textContent = 'Save failed'; }} }});
-      if (_nextAvailIso) document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
+        .catch(function(){{ if (statusEl) statusEl.textContent = 'Save failed'; }});
+      // Immediately update all time displays to reflect the new timezone
+      if (_nextAvailIso) {{
+        document.getElementById('nextAvailTime').textContent = fmtSlotLocal(_nextAvailIso);
+        var qbTime = document.getElementById('qbSlotTime');
+        if (qbTime) qbTime.textContent = fmtSlotLocal(_nextAvailIso);
+      }}
       if (_selectedCalDay) loadSlots(_selectedCalDay);
     }}
 
@@ -6174,17 +6338,52 @@ def schedule_page_html(user_email: str) -> str:
 
     function clickNextAvail() {{
       if (!_nextAvailIso) return;
-      var localDs = utcIsoToLocalDate(_nextAvailIso);
-      var dateInput = document.getElementById('datePick');
-      if (dateInput) dateInput.value = localDs;
-      onDatePick(localDs);
-      setTimeout(function() {{
-        var btn = document.querySelector('.slot-btn[data-iso="' + _nextAvailIso + '"]');
-        if (btn && !btn.disabled) {{
-          btn.scrollIntoView({{behavior:'smooth', block:'center'}});
-          selectSlot(_nextAvailIso);
+      var panel = document.getElementById('qbPanel');
+      var slotEl = document.getElementById('qbSlotTime');
+      if (slotEl) slotEl.textContent = fmtSlotLocal(_nextAvailIso);
+      if (panel) {{ panel.style.display = ''; panel.scrollIntoView({{behavior:'smooth', block:'nearest'}}); }}
+    }}
+
+    // ── Quick-book (Next Available) ───────────────────────────────────────
+    async function confirmQuickBook() {{
+      var op  = document.getElementById('qbOp').value.trim();
+      var url = document.getElementById('qbUrl').value.trim();
+      var errEl = document.getElementById('qbErr');
+      if (!op || !url) {{ errEl.textContent = 'Operation name and website are required.'; return; }}
+      if (!_nextAvailIso) return;
+      if (!url.startsWith('http')) url = 'https://' + url;
+      var btn = document.getElementById('qbConfirmBtn');
+      btn.disabled = true; btn.textContent = 'Booking\u2026';
+      errEl.textContent = '';
+      try {{
+        var fmt = document.querySelector('input[name="qbFmt"]:checked');
+        var res = await fetch('/api/schedule-check', {{
+          method: 'POST', headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{operation: op, website: url, scheduled_at: _nextAvailIso,
+                                 report_format: fmt ? fmt.value : 'html', repeat_interval: 'none'}})
+        }});
+        var data = await res.json();
+        if (data.ok) {{
+          fetch('/api/user/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+                body:JSON.stringify({{last_op_name: op, last_op_website: url,
+                                      report_format: fmt ? fmt.value : 'html'}})}}).catch(function(){{}});
+          document.getElementById('qbPanel').style.display = 'none';
+          var naBox = document.getElementById('nextAvailBox');
+          if (naBox) {{
+            naBox.style.background = '#22c55e'; naBox.style.cursor = 'default'; naBox.onclick = null;
+            document.getElementById('nextAvailTime').textContent = 'Booked \u2713 ' + fmtSlotLocal(_nextAvailIso);
+            document.getElementById('nextAvailAhead').textContent = 'Check your Scheduled Checks below';
+            document.getElementById('nextAvailLabel').textContent = 'Booking Confirmed';
+          }}
+          loadMyChecks(); pollNextAvail();
+        }} else {{
+          errEl.textContent = data.error || 'Booking failed. Try again.';
+          btn.disabled = false; btn.textContent = 'Confirm Booking';
         }}
-      }}, 800);
+      }} catch(e) {{
+        errEl.textContent = 'Network error. Try again.';
+        btn.disabled = false; btn.textContent = 'Confirm Booking';
+      }}
     }}
 
     // ── Booking ───────────────────────────────────────────────────────────
@@ -6192,7 +6391,7 @@ def schedule_page_html(user_email: str) -> str:
       var op  = document.getElementById('schedOp').value.trim();
       var url = document.getElementById('schedUrl').value.trim();
       if (!op || !url) {{ alert('Please enter operation name and website URL.'); return; }}
-      if (!_selectedSlot) {{ alert('Please select a time slot.'); return; }}
+      if (!_selectedSlot) {{ alert('Please select a time slot above first.'); return; }}
       if (!url.startsWith('http')) url = 'https://' + url;
       var btn = document.getElementById('confirmBtn');
       btn.disabled = true; btn.textContent = 'Booking\u2026';
@@ -6208,12 +6407,12 @@ def schedule_page_html(user_email: str) -> str:
         }});
         var data = await res.json();
         if (data.ok) {{
+          fetch('/api/user/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+                body:JSON.stringify({{last_op_name: op, last_op_website: url,
+                                      report_format: fmt ? fmt.value : 'html',
+                                      repeat_interval: repeatInterval}})}}).catch(function(){{}});
           _selectedSlot = null;
           document.getElementById('bookingCard').style.display = 'none';
-          document.getElementById('schedOp').value = '';
-          document.getElementById('schedUrl').value = '';
-          var noneRadio = document.querySelector('input[name="repeatInt"][value="none"]');
-          if (noneRadio) noneRadio.checked = true;
           btn.textContent = 'Booked!'; btn.style.background = 'var(--green)';
           setTimeout(function() {{ btn.textContent = 'Confirm Booking'; btn.style.background = ''; btn.disabled = false; }}, 2500);
           if (_selectedCalDay) loadSlots(_selectedCalDay);
@@ -6279,10 +6478,11 @@ def schedule_page_html(user_email: str) -> str:
     }};
 
     function _runSchedulerInit() {{
-      // On first visit, persist the displayed timezone so future pages match
-      fetch('/api/user/timezone', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      // Persist timezone on first visit so future loads show the right time
+      fetch('/api/user/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
             body:JSON.stringify({{timezone:_userTz}})}}).catch(function(){{}});
 
+      // Update Next Available display in user's timezone
       var naEl = document.getElementById('nextAvailTime');
       if (naEl) {{
         if (_nextAvailIso) {{
@@ -6291,16 +6491,36 @@ def schedule_page_html(user_email: str) -> str:
           naEl.textContent = 'No slots in next 30 days';
         }}
       }}
+
+      // Pre-fill quick-book and booking form with saved values
+      var qbOpEl = document.getElementById('qbOp');
+      var qbUrlEl = document.getElementById('qbUrl');
+      if (qbOpEl && _savedOpName) qbOpEl.value = _savedOpName;
+      if (qbUrlEl && _savedOpWebsite) qbUrlEl.value = _savedOpWebsite;
+      var opEl = document.getElementById('schedOp');
+      var urlEl = document.getElementById('schedUrl');
+      if (opEl && _savedOpName) opEl.value = _savedOpName;
+      if (urlEl && _savedOpWebsite) urlEl.value = _savedOpWebsite;
+
+      // Pre-select saved report format and repeat interval
+      var fmtRadio = document.querySelector('input[name="rptFmt"][value="' + _savedFmt + '"]');
+      if (fmtRadio) fmtRadio.checked = true;
+      var qbFmtRadio = document.querySelector('input[name="qbFmt"][value="' + _savedFmt + '"]');
+      if (qbFmtRadio) qbFmtRadio.checked = true;
+      var repRadio = document.querySelector('input[name="repeatInt"][value="' + _savedRepeat + '"]');
+      if (repRadio) repRadio.checked = true;
+      // Show repeat section only for users with multiple credits
+      var repSec = document.getElementById('repeatSection');
+      if (repSec && _canRepeat) repSec.style.display = '';
+
+      // Set date to today; load slots (will jump to next-avail date)
       var dateInput = document.getElementById('datePick');
       if (dateInput) {{
         var todayLocalDs = utcIsoToLocalDate(new Date().toISOString());
         dateInput.min = todayLocalDs;
-        if (_nextAvailIso) {{
-          clickNextAvail();
-        }} else {{
-          dateInput.value = todayLocalDs;
-          onDatePick(todayLocalDs);
-        }}
+        var targetDs = _nextAvailIso ? utcIsoToLocalDate(_nextAvailIso) : todayLocalDs;
+        dateInput.value = targetDs;
+        onDatePick(targetDs);
       }}
       pollNextAvail();
       setInterval(pollNextAvail, 5000);
