@@ -2006,7 +2006,7 @@ BASE_TEMPLATE = """<!DOCTYPE html>
             <a class="dropdown-item" href="/agents">Agents &amp; API</a>
             <a class="dropdown-item" href="/settings">Settings</a>
             <div id="ddSignOut" style="display:none;border-top:1px solid rgba(255,255,255,.1);margin-top:4px;padding-top:4px">
-              <button class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.7);font-size:.82rem;padding:8px 16px" onclick="doLogout()">Sign Out</button>
+              <button class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font-size:.84rem;padding:11px 17px" onclick="doLogout()">Sign Out</button>
             </div>
           </div>
         </div>
@@ -2792,7 +2792,7 @@ MAIN_HTML = """<!DOCTYPE html>
             <a class="dropdown-item" href="/agents">Agents &amp; API</a>
             <a class="dropdown-item" href="/settings">Settings</a>
             <div id="ddSignOut" style="display:none;border-top:1px solid rgba(255,255,255,.1);margin-top:4px;padding-top:4px">
-              <button class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.7);font-size:.82rem;padding:8px 16px" onclick="doLogout()">Sign Out</button>
+              <button class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font-size:.84rem;padding:11px 17px" onclick="doLogout()">Sign Out</button>
             </div>
           </div>
         </div>
