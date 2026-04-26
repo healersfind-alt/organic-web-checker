@@ -6592,7 +6592,7 @@ def schedule_page_html(user_email: str) -> str:
         var html = '';
         data.checks.forEach(function(c) {{
           var actions = '';
-          if (c.status === 'scheduled') actions = '<button class="sched-cancel-btn" onclick="cancelCheck(\'' + c.id + '\')">Cancel</button>';
+          if (c.status === 'scheduled') actions = '<button class="sched-cancel-btn" onclick="cancelCheck(\\'' + c.id + '\\')">Cancel</button>';
           else if (c.status === 'done') actions = '<a class="sched-view-btn" href="/scheduled-report/' + c.id + '">View</a>';
           var repeatBadge = '';
           if (c.repeat_interval && c.repeat_interval !== 'none') {{
