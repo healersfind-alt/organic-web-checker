@@ -2075,7 +2075,7 @@ async function doLogin(){
   try{
     const res=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
     const data=await res.json();
-    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(window.viewingJobId)loadResult(window.viewingJobId);}
+    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(typeof window.onAuthSuccess==='function'){window.onAuthSuccess(data.email,data.credits);}else if(window.viewingJobId){loadResult(window.viewingJobId);}}
     else showAuthMsg(data.error||'Sign-in failed.','error');
   }catch(e){showAuthMsg('Network error — try again.','error');}
 }
@@ -2089,7 +2089,7 @@ async function doRegister(){
   try{
     const res=await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
     const data=await res.json();
-    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(window.viewingJobId)loadResult(window.viewingJobId);}
+    if(data.ok){closeAuthModal();updateAuthUI(data.email,data.credits);if(typeof window.onAuthSuccess==='function'){window.onAuthSuccess(data.email,data.credits);}else if(window.viewingJobId){loadResult(window.viewingJobId);}}
     else showAuthMsg(data.error||'Registration failed.','error');
   }catch(e){showAuthMsg('Network error — try again.','error');}
 }
@@ -5098,6 +5098,7 @@ def success():
     <strong style="color:var(--text)">Refund policy:</strong> Credits are non-refundable once any check has been run against your purchase. Unused packs may be refunded within 7 days if zero credits have been used &mdash; email <a href="mailto:hello@organicwebchecker.com" style="color:var(--primary)">hello@organicwebchecker.com</a>.
   </div>
   <a href="/" class="cta-btn">Run a Checker &rarr;</a>
+  <a href="/schedule" class="cta-btn" style="margin-top:10px;background:white;color:var(--primary);border:2px solid var(--primary)">Return to Schedule Checker &rarr;</a>
 </div>"""
     return render_template_string(BASE_TEMPLATE, css=GLOBAL_CSS,
                                   page_title='Payment Confirmed', active='', body=body)
@@ -6104,6 +6105,8 @@ def schedule_page_html(user_email: str) -> str:
 
     {banner_html}
 
+    <div id="scheduleStatus" style="display:none;padding:12px 16px;border-radius:10px;margin-bottom:4px;font-size:.87rem;font-weight:600"></div>
+
     <!-- Timezone selector -->
     <div class="card" style="padding:14px 20px">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -6388,12 +6391,76 @@ def schedule_page_html(user_email: str) -> str:
         .catch(function() {{}});
     }}
 
+    // ── Status helper ────────────────────────────────────────────────────
+    function showSchedStatus(msg, type) {{
+      var el = document.getElementById('scheduleStatus');
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = msg ? '' : 'none';
+      el.style.background = type === 'error' ? '#FEE2E2' : type === 'success' ? '#DCFCE7' : '#EDE9FE';
+      el.style.color      = type === 'error' ? '#991B1B' : type === 'success' ? '#166534' : '#4C1D95';
+      if (type !== 'error') setTimeout(function() {{ if (el.textContent === msg) el.style.display = 'none'; }}, 6000);
+    }}
+
+    // ── Draft persistence ─────────────────────────────────────────────────
+    function saveScheduleDraft() {{
+      var qbPanel = document.getElementById('qbPanel');
+      var mode = (qbPanel && qbPanel.style.display !== 'none') ? 'quick' : (_selectedSlot ? 'custom' : '');
+      var draft = {{
+        op:   (document.getElementById('qbOp')   || {{}}).value || (document.getElementById('schedOp')  || {{}}).value || '',
+        url:  (document.getElementById('qbUrl')  || {{}}).value || (document.getElementById('schedUrl') || {{}}).value || '',
+        slot: _selectedSlot,
+        nextAvailIso: _nextAvailIso,
+        fmt:  ((document.querySelector('input[name="qbFmt"]:checked')  || document.querySelector('input[name="rptFmt"]:checked') || {{}}).value) || 'html',
+        repeat: ((document.querySelector('input[name="repeatInt"]:checked') || {{}}).value) || 'none',
+        mode: mode
+      }};
+      console.log('[SCHEDULE] draft saved', draft);
+      try {{ localStorage.setItem('owc_schedule_draft', JSON.stringify(draft)); }} catch(e) {{}}
+    }}
+
+    function resumeScheduleDraft() {{
+      var raw;
+      try {{ raw = localStorage.getItem('owc_schedule_draft'); }} catch(e) {{ return; }}
+      if (!raw) return;
+      try {{
+        var draft = JSON.parse(raw);
+        localStorage.removeItem('owc_schedule_draft');
+        console.log('[SCHEDULE] draft restored', draft);
+        if (draft.op) {{
+          var qbOp = document.getElementById('qbOp'); if (qbOp) qbOp.value = draft.op;
+          var sOp  = document.getElementById('schedOp');  if (sOp)  sOp.value  = draft.op;
+        }}
+        if (draft.url) {{
+          var qbUrl = document.getElementById('qbUrl'); if (qbUrl) qbUrl.value = draft.url;
+          var sUrl  = document.getElementById('schedUrl');  if (sUrl)  sUrl.value  = draft.url;
+        }}
+        if (draft.fmt) {{
+          var fR  = document.querySelector('input[name="rptFmt"][value="' + draft.fmt + '"]');  if (fR)  fR.checked  = true;
+          var qbF = document.querySelector('input[name="qbFmt"][value="'  + draft.fmt + '"]');  if (qbF) qbF.checked = true;
+        }}
+        if (draft.repeat) {{
+          var rR = document.querySelector('input[name="repeatInt"][value="' + draft.repeat + '"]'); if (rR) rR.checked = true;
+        }}
+        if (draft.mode === 'quick' && _nextAvailIso) {{
+          clickNextAvail();
+        }} else if (draft.slot) {{
+          selectSlot(draft.slot);
+        }}
+        showSchedStatus('Signed in. Continue booking below.', 'success');
+      }} catch(e) {{ console.log('[SCHEDULE] draft restore error', e); }}
+    }}
+
     function clickNextAvail() {{
-      if (!_nextAvailIso) return;
+      if (!_nextAvailIso) {{
+        showSchedStatus('No slots available right now. Try the date picker below.', 'info');
+        return;
+      }}
       var panel = document.getElementById('qbPanel');
       var slotEl = document.getElementById('qbSlotTime');
       if (slotEl) slotEl.textContent = fmtSlotLocal(_nextAvailIso);
       if (panel) {{ panel.style.display = ''; panel.scrollIntoView({{behavior:'smooth', block:'nearest'}}); }}
+      console.log('[SCHEDULE] clicked nextAvail', _nextAvailIso);
     }}
 
     // ── Quick-book (Next Available) ───────────────────────────────────────
@@ -6407,6 +6474,8 @@ def schedule_page_html(user_email: str) -> str:
       var btn = document.getElementById('qbConfirmBtn');
       btn.disabled = true; btn.textContent = 'Booking\u2026';
       errEl.textContent = '';
+      showSchedStatus('Booking\u2026', 'info');
+      console.log('[SCHEDULE] confirmQuickBook', op, url, _nextAvailIso);
       try {{
         var fmt = document.querySelector('input[name="qbFmt"]:checked');
         var res = await fetch('/api/schedule-check', {{
@@ -6415,6 +6484,7 @@ def schedule_page_html(user_email: str) -> str:
                                  report_format: fmt ? fmt.value : 'html', repeat_interval: 'none'}})
         }});
         var data = await res.json();
+        console.log('[SCHEDULE] api response', res.status, data);
         if (data.ok) {{
           fetch('/api/user/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
                 body:JSON.stringify({{last_op_name: op, last_op_website: url,
@@ -6427,19 +6497,27 @@ def schedule_page_html(user_email: str) -> str:
             document.getElementById('nextAvailAhead').textContent = 'Check your Scheduled Checks below';
             document.getElementById('nextAvailLabel').textContent = 'Booking Confirmed';
           }}
+          showSchedStatus('Booking confirmed.', 'success');
           loadMyChecks(); pollNextAvail();
         }} else if (res.status === 401) {{
           btn.disabled = false; btn.textContent = 'Confirm Booking';
+          saveScheduleDraft();
+          showSchedStatus('Please sign in to continue.', 'info');
           openAuthModal('signin');
         }} else if (res.status === 402) {{
           btn.disabled = false; btn.textContent = 'Confirm Booking';
+          saveScheduleDraft();
+          showSchedStatus('You need 1 credit to schedule this check.', 'info');
           errEl.innerHTML = 'You need 1 credit to book. <button onclick="buyOneCredit()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 12px;font-size:.8rem;cursor:pointer;margin-left:6px">Buy 1 Credit \u2014 $25</button>';
         }} else {{
-          errEl.textContent = data.error || 'Booking failed. Try again.';
+          var msg = data.error || 'Booking failed. Try again.';
+          errEl.textContent = msg;
+          showSchedStatus(msg, 'error');
           btn.disabled = false; btn.textContent = 'Confirm Booking';
         }}
       }} catch(e) {{
         errEl.textContent = 'Network error. Try again.';
+        showSchedStatus('Network error. Try again.', 'error');
         btn.disabled = false; btn.textContent = 'Confirm Booking';
       }}
     }}
@@ -6448,11 +6526,13 @@ def schedule_page_html(user_email: str) -> str:
     async function confirmBooking() {{
       var op  = document.getElementById('schedOp').value.trim();
       var url = document.getElementById('schedUrl').value.trim();
-      if (!op || !url) {{ alert('Please enter operation name and website URL.'); return; }}
-      if (!_selectedSlot) {{ alert('Please select a time slot above first.'); return; }}
+      if (!op || !url) {{ showSchedStatus('Please enter operation name and website URL.', 'error'); return; }}
+      if (!_selectedSlot) {{ showSchedStatus('Please select a time slot above first.', 'error'); return; }}
       if (!url.startsWith('http')) url = 'https://' + url;
       var btn = document.getElementById('confirmBtn');
       btn.disabled = true; btn.textContent = 'Booking\u2026';
+      showSchedStatus('Booking\u2026', 'info');
+      console.log('[SCHEDULE] confirmBooking', op, url, _selectedSlot);
       try {{
         var fmt = document.querySelector('input[name="rptFmt"]:checked');
         var repeatEl = document.querySelector('input[name="repeatInt"]:checked');
@@ -6464,6 +6544,7 @@ def schedule_page_html(user_email: str) -> str:
                                  repeat_interval: repeatInterval}})
         }});
         var data = await res.json();
+        console.log('[SCHEDULE] api response', res.status, data);
         if (data.ok) {{
           fetch('/api/user/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
                 body:JSON.stringify({{last_op_name: op, last_op_website: url,
@@ -6473,21 +6554,26 @@ def schedule_page_html(user_email: str) -> str:
           document.getElementById('bookingCard').style.display = 'none';
           btn.textContent = 'Booked!'; btn.style.background = 'var(--green)';
           setTimeout(function() {{ btn.textContent = 'Confirm Booking'; btn.style.background = ''; btn.disabled = false; }}, 2500);
+          showSchedStatus('Booking confirmed.', 'success');
           if (_selectedCalDay) loadSlots(_selectedCalDay);
           loadMyChecks(); pollNextAvail();
         }} else if (res.status === 401) {{
           btn.disabled = false; btn.textContent = 'Confirm Booking';
+          saveScheduleDraft();
+          showSchedStatus('Please sign in to continue.', 'info');
           openAuthModal('signin');
         }} else if (res.status === 402) {{
           btn.disabled = false; btn.textContent = 'Confirm Booking';
-          var errCard = document.getElementById('bookingCard').querySelector('div[style*="color:var(--red"]');
+          saveScheduleDraft();
+          showSchedStatus('You need 1 credit to schedule this check.', 'info');
           buyOneCredit();
         }} else {{
-          alert(data.error || 'Booking failed. Please try again.');
+          var msg = data.error || 'Booking failed. Please try again.';
+          showSchedStatus(msg, 'error');
           btn.disabled = false; btn.textContent = 'Confirm Booking';
         }}
       }} catch(e) {{
-        alert('Network error. Please try again.');
+        showSchedStatus('Network error. Please try again.', 'error');
         btn.disabled = false; btn.textContent = 'Confirm Booking';
       }}
     }}
@@ -6591,18 +6677,34 @@ def schedule_page_html(user_email: str) -> str:
       pollNextAvail();
       setInterval(pollNextAvail, 5000);
       loadMyChecks();
+      resumeScheduleDraft();
     }}
+
+    // ── After login/register: save draft and reload so page reflects new auth state ──
+    window.onAuthSuccess = function(email, credits) {{
+      console.log('[SCHEDULE] onAuthSuccess', email, credits);
+      saveScheduleDraft();
+      location.reload();
+    }};
 
     // ── Buy-one-credit helper (used when booking requires a credit purchase) ──
     function buyOneCredit() {{
+      saveScheduleDraft();
+      showSchedStatus('Redirecting to checkout\u2026', 'info');
+      console.log('[SCHEDULE] buyOneCredit');
       fetch('/create-checkout-session', {{
         method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{tier_index: 0}})
       }}).then(function(r) {{ return r.json(); }}).then(function(d) {{
-        if (d.login_required) {{ openAuthModal('signin'); return; }}
+        console.log('[SCHEDULE] checkout response', d);
+        if (d.login_required) {{
+          showSchedStatus('Please sign in before buying a credit.', 'info');
+          openAuthModal('signin');
+          return;
+        }}
         if (d.url) window.location = d.url;
-        else alert(d.error || 'Checkout failed.');
-      }}).catch(function() {{ alert('Network error. Please try again.'); }});
+        else {{ showSchedStatus(d.error || 'Checkout failed.', 'error'); }}
+      }}).catch(function() {{ showSchedStatus('Network error. Please try again.', 'error'); }});
     }}
 
     // Run now if DOM is ready, otherwise wait for it

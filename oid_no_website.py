@@ -33,12 +33,15 @@ Usage:
 import argparse
 import csv
 import os
+import random
 import re
 import sys
 import time
+import urllib.parse
 
 import openpyxl
 import requests
+from bs4 import BeautifulSoup
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -47,7 +50,8 @@ import requests
 DEFAULT_XLSX = "/mnt/c/Users/toit_/OneDrive/OID.OperationSearchResults.2026.4.16.5_34 PM.xlsx"
 DEFAULT_OUT         = os.path.join(os.path.dirname(__file__), "oid_no_website.csv")
 DEFAULT_SEARCHED    = os.path.join(os.path.dirname(__file__), "oid_no_website_searched.csv")
-SEARCH_DELAY        = 1.2   # seconds between DuckDuckGo requests
+SEARCH_DELAY        = 0.5   # seconds between rows (slug probes have built-in 0.15s gaps)
+SEARCH_JITTER       = 0.5   # random extra delay 0–0.5s
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -115,9 +119,9 @@ def load_no_website(xlsx_path: str, handling_only: bool = False) -> list[dict]:
             continue
 
         url = col(row, COL_URL)
-        if url and url.startswith("http"):
+        if url:
             skipped_url += 1
-            continue   # has a website already — skip
+            continue   # has a website already — skip (even if no http:// prefix)
 
         handling = col(row, COL_HANDLING)
         if handling_only and "Certified" not in handling:
@@ -164,7 +168,6 @@ def load_no_website(xlsx_path: str, handling_only: bool = False) -> list[dict]:
 # Phase 2 — DuckDuckGo search for each operation name
 # ---------------------------------------------------------------------------
 
-# Legal-suffix words to strip when building domain guesses (only true stop words)
 _STRIP_WORDS = {
     "llc", "inc", "corp", "co", "ltd", "lp", "llp", "dba",
     "the", "and", "of", "at", "an", "a",
@@ -173,41 +176,85 @@ _STRIP_WORDS = {
 
 _TLDS = [".com", ".net", ".org", ".co", ".farm", ".bio"]
 
+DDG_URL = "https://html.duckduckgo.com/html/"
 
-def _candidate_slugs(name: str) -> list[str]:
-    """Generate likely domain name slugs from an operation name."""
-    # Handle DBA: take the part after dba/d.b.a
-    dba_match = re.search(r"\bdba\b\s+(.+)", name, re.IGNORECASE)
-    if dba_match:
-        name = dba_match.group(1)
+_LEGAL_RE = re.compile(
+    r"\b(llc|inc|corp|ltd|lp|llp|co\.?|dba)\b\.?", re.IGNORECASE
+)
 
-    # Strip parenthetical suffixes like " - Division Name"
-    name = re.sub(r"\s*[-–]\s*.+$", "", name).strip()
 
-    # Tokenise — lowercase alphabetic only
-    tokens = re.findall(r"[a-z]+", name.lower())
+def _significant_tokens(name: str) -> set[str]:
+    """Return lowercase alphabetic tokens ≥3 chars, excluding stop/legal words."""
+    return {t for t in re.findall(r"[a-z]{3,}", name.lower()) if t not in _STRIP_WORDS}
 
-    # Remove stop/legal words
-    tokens = [t for t in tokens if t not in _STRIP_WORDS]
 
-    if not tokens:
+def _ddg_query(session: requests.Session, query: str) -> list[str]:
+    """
+    Search DuckDuckGo HTML interface, return up to 5 organic result URLs.
+    DDG wraps real URLs as: /l/?uddg=<encoded_url>&...
+    """
+    try:
+        r = session.get(DDG_URL, params={"q": query, "kl": "us-en"}, timeout=12)
+        r.raise_for_status()
+    except Exception:
         return []
 
-    slugs = []
-    full = "".join(tokens)
-    slugs.append(full)                                  # e.g. equatorcoffees
-    if len(tokens) >= 2:
-        slugs.append("".join(tokens[:2]))               # first two words
-        slugs.append("".join(tokens[:3]))               # first three
-    if len(tokens) >= 4:
-        # Acronym
-        slugs.append("".join(t[0] for t in tokens))
+    soup = BeautifulSoup(r.text, "html.parser")
+    urls = []
+    for a in soup.select("a.result__a"):
+        href = a.get("href", "")
+        # Absolute DDG redirect: https://duckduckgo.com/l/?uddg=...
+        if "uddg=" in href:
+            try:
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                real = qs.get("uddg", [""])[0]
+                if real.startswith("http") and "duckduckgo.com" not in real:
+                    urls.append(real)
+            except Exception:
+                pass
+        elif href.startswith("http") and "duckduckgo.com" not in href:
+            urls.append(href)
+        if len(urls) >= 5:
+            break
 
-    return list(dict.fromkeys(slugs))   # deduplicate, preserve order
+    return urls
+
+
+def _name_match_confidence(url: str, name_tokens: set[str]) -> str:
+    """
+    Score how well a URL's domain matches the operation name.
+    Returns 'high' (2+ tokens), 'medium' (1 token), or 'none'.
+    Uses substring matching so compound domains (e.g. 'wishfarms') match
+    individual name tokens ('wish', 'farms').
+    """
+    try:
+        netloc = urllib.parse.urlparse(url).netloc
+    except Exception:
+        return "none"
+    slug = re.sub(r"^www\.", "", netloc)
+    slug = re.sub(r"\.[a-z]{2,10}$", "", slug)          # strip TLD
+    slug_lower = slug.lower()
+
+    # Exact token match first (handles hyphenated domains like wish-farms)
+    slug_tokens = set(re.findall(r"[a-z]{3,}", slug_lower))
+    overlap = slug_tokens & name_tokens
+    if len(overlap) >= 2:
+        return "high"
+    if len(overlap) == 1:
+        return "medium"
+
+    # Substring match handles compound domains (wishfarms, avanitea, etc.)
+    sub_matches = sum(1 for t in name_tokens if t in slug_lower)
+    if sub_matches >= 2:
+        return "high"
+    if sub_matches == 1:
+        return "medium"
+
+    return "none"
 
 
 def probe_url(url: str, session: requests.Session, timeout: int = 6) -> bool:
-    """Return True if the URL responds with a 200-ish HTTP status."""
+    """Return True if the URL responds with a non-error HTTP status."""
     try:
         r = session.head(url, timeout=timeout, allow_redirects=True)
         return r.status_code < 400
@@ -219,57 +266,106 @@ def probe_url(url: str, session: requests.Session, timeout: int = 6) -> bool:
             return False
 
 
+def _candidate_slugs(name: str) -> list[str]:
+    """Generate likely domain slugs from an operation name (fallback only)."""
+    dba_match = re.search(r"\bdba\b\s+(.+)", name, re.IGNORECASE)
+    if dba_match:
+        name = dba_match.group(1)
+    name = re.sub(r"\s*[-–]\s*.+$", "", name).strip()
+    tokens = [t for t in re.findall(r"[a-z]+", name.lower()) if t not in _STRIP_WORDS]
+    if not tokens:
+        return []
+    slugs = ["".join(tokens)]
+    if len(tokens) >= 2:
+        slugs.append("".join(tokens[:2]))
+        slugs.append("".join(tokens[:3]))
+    if len(tokens) >= 4:
+        slugs.append("".join(t[0] for t in tokens))
+    return list(dict.fromkeys(slugs))
+
+
 def search_for_url(session: requests.Session, name: str) -> tuple[str, str]:
     """
-    Try common domain patterns derived from the operation name.
-    Returns (found_url, confidence) where confidence is 'high'|'low'|'none'.
-    'high' = domain slug closely matches the operation name tokens.
-    'low'  = domain slug is a subset (2-word only, or short acronym).
+    Find the website for an organic operation.
+    Returns (found_url, confidence): 'high'|'medium'|'low'|'none'.
+
+    Strategy:
+      1. Slug probe — generate domain candidates from the operation name and
+         directly test them with HTTP HEAD. Fast and accurate for operations
+         whose domain matches their name.
+      2. DDG fallback — for operations where slug guessing fails entirely,
+         run a DuckDuckGo text query and validate the top results against the
+         operation name tokens.
     """
-    slugs = _candidate_slugs(name)
-    if not slugs:
+    name_tokens = _significant_tokens(name)
+    if not name_tokens:
         return "", "none"
 
-    tokens = set(re.findall(r"[a-z]+", name.lower())) - _STRIP_WORDS
-
-    for slug in slugs:
+    # ── 1. Slug guessing + HTTP probe ─────────────────────────────────────────
+    for slug in _candidate_slugs(name):
         for tld in _TLDS:
             url = f"https://www.{slug}{tld}"
             if probe_url(url, session):
-                # Confidence: how much of the slug overlaps with the name tokens
-                slug_tokens = set(re.findall(r"[a-z]{3,}", slug))
-                overlap = slug_tokens & tokens
-                confidence = "high" if len(overlap) >= 2 else "low"
+                confidence = _name_match_confidence(url, name_tokens)
+                # Accept any non-'none' match; at minimum return 'low'
+                return url, confidence if confidence != "none" else "low"
+            time.sleep(0.15)
+
+    # ── 2. DDG fallback (for names where slug guessing finds nothing) ─────────
+    clean_name = _LEGAL_RE.sub("", name).strip().rstrip(",")
+    for query in [f'"{clean_name}" organic', f'{clean_name} organic farm']:
+        result_urls = _ddg_query(session, query)
+        for url in result_urls:
+            confidence = _name_match_confidence(url, name_tokens)
+            if confidence in ("high", "medium"):
                 return url, confidence
-            time.sleep(0.15)    # brief gap between probes
+        if result_urls:
+            # DDG found something but name didn't match — keep as low-confidence
+            return result_urls[0], "low"
+        time.sleep(1.0)
 
     return "", "none"
 
 
-def run_search(in_path: str, out_path: str, limit: int | None):
-    print(f"\nPhase 2 — searching DuckDuckGo for websites …")
+def run_search(in_path: str, out_path: str, limit: int | None, resume: bool = False):
+    print(f"\nPhase 2 — searching for websites …")
     print(f"Input : {in_path}")
     print(f"Output: {out_path}")
-    if limit:
-        print(f"Limit : first {limit} rows")
 
     with open(in_path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+        all_rows = list(csv.DictReader(f))
+
+    # ── Resume: skip rows already in the output file ──────────────────────────
+    already_done: set[str] = set()
+    if resume and os.path.exists(out_path):
+        with open(out_path, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                already_done.add(r["operation_name"])
+        print(f"  Resuming: {len(already_done):,} rows already done, "
+              f"{len(all_rows) - len(already_done):,} remaining.")
+
+    rows = [r for r in all_rows if r["operation_name"] not in already_done]
 
     if limit:
         rows = rows[:limit]
+        print(f"Limit : first {limit} remaining rows")
 
-    total = len(rows)
+    total_remaining = len(rows)
+    total_all       = len(all_rows)
+    file_mode       = "a" if already_done else "w"
+
     session = requests.Session()
     session.headers.update({"User-Agent": _UA})
 
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
+    with open(out_path, file_mode, newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=SEARCHED_COLS, extrasaction="ignore")
-        writer.writeheader()
+        if file_mode == "w":
+            writer.writeheader()
 
         for i, row in enumerate(rows, 1):
             name = row["operation_name"]
-            print(f"  [{i:>5}/{total}] {name[:55]:<55}", end=" ", flush=True)
+            overall_i = len(already_done) + i
+            print(f"  [{overall_i:>6}/{total_all}] {name[:55]:<55}", end=" ", flush=True)
 
             url, confidence = search_for_url(session, name)
             row["found_url"]         = url
@@ -281,11 +377,14 @@ def run_search(in_path: str, out_path: str, limit: int | None):
             writer.writerow(row)
             f.flush()
 
-            if i < total:
-                time.sleep(SEARCH_DELAY)
+            if i < total_remaining:
+                time.sleep(SEARCH_DELAY + random.random() * SEARCH_JITTER)
 
-    found = sum(1 for r in rows if r.get("found_url"))
-    print(f"\nDone. {found}/{total} operations found a candidate URL.")
+    # Tally across the full output file
+    with open(out_path, newline="", encoding="utf-8") as f:
+        all_results = list(csv.DictReader(f))
+    found = sum(1 for r in all_results if r.get("found_url"))
+    print(f"\nDone. {found}/{len(all_results)} operations found a candidate URL.")
     print(f"Results: {out_path}")
 
 
@@ -309,6 +408,8 @@ def main():
                         help="Limit Phase 2 to first N rows")
     parser.add_argument("--handling-only", action="store_true",
                         help="Phase 1: only include HANDLING scope certified operations")
+    parser.add_argument("--resume", action="store_true",
+                        help="Phase 2: skip rows already in the output CSV and append new results")
     args = parser.parse_args()
 
     # ── Phase 1 ──────────────────────────────────────────────────────────────
@@ -336,7 +437,7 @@ def main():
 
     # ── Phase 2 (optional) ───────────────────────────────────────────────────
     if args.search:
-        run_search(args.out, args.searched_out, args.limit)
+        run_search(args.out, args.searched_out, args.limit, resume=args.resume)
 
 
 if __name__ == "__main__":
